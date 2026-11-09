@@ -1,0 +1,4 @@
+# Strings that identify the maintainer or the mother device, one per line, searched for as whole
+# words (grep -wF) in the image's file tree (spec §5.3 point 5). No secrets here: e-mail addresses,
+# Wi-Fi names and keys go in SECRETS_FILE. build-image.sh adds the mother device's hostname itself.
+chris-yyau

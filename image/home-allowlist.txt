@@ -1,0 +1,22 @@
+# What may stay under /home/ubuntu/.config/systemd/user, .config/pipewire, .config/wireplumber and
+# .local in a release image (spec §5.4). sanitize-rootfs.sh deletes every other file and link
+# there (and prints each one); check-rootfs.sh requires exactly these. An entry ending in / is a
+# whole directory. Entries under a *.wants/ directory must be links to a unit on this list, the
+# others regular files.
+# system-files.txt and system-post.sh: user units and their links, audio settings
+.config/systemd/user/idle-blanker.service
+.config/systemd/user/thinksmart-mic.service
+.config/systemd/user/vcnl4200-proximity-daemon.service
+.config/systemd/user/default.target.wants/idle-blanker.service
+.config/systemd/user/default.target.wants/thinksmart-mic.service
+.config/systemd/user/pipewire-pulse.service.wants/thinksmart-mic.service
+.config/pipewire/pipewire.conf.d/10-thinksmart-rate.conf
+.config/wireplumber/main.lua.d/99-cd18781y-alsa.lua
+# the gateway's unit (sanitize writes it from image/xiaozhi-hub.service): without it and its link
+# the gateway does not start at boot
+.config/systemd/user/xiaozhi-hub.service
+.config/systemd/user/default.target.wants/xiaozhi-hub.service
+# the Python the gateway's .venv runs on, and uv, which the gateway's scripts/install.sh needs
+.local/share/uv/
+.local/bin/uv
+.local/bin/uvx

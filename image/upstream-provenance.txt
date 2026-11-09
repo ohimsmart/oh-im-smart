@@ -1,0 +1,9 @@
+# Lines of the image's file tree that may name the upstream author or the maintainer
+# (spec §5.3 point 5); check-rootfs.sh fails on any other hit. Paths are relative to the image
+# root and start with /. Fields are tab separated:
+#   file<TAB>PATTERN        whole file, only for LICENSE*/NOTICE* (a README holds install commands)
+#   line<TAB>PATH<TAB>LINE  that exact line, e.g. a README badge or the weather plugin's User-Agent
+file	/home/ubuntu/xiaozhi-hub-server/LICENSE*
+file	/home/ubuntu/xiaozhi-hub-server/NOTICE*
+file	/opt/thinksmart/client/*/LICENSE*
+file	/opt/thinksmart/client/*/NOTICE*

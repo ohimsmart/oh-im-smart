@@ -1,0 +1,15 @@
+[Unit]
+Description=xiaozhi-hub-server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/xiaozhi-hub-server/main/xiaozhi-server
+Environment="PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" SKIP_DOCTOR=1 HUB_AUTOSTART=1 PYTHONUTF8=1
+ExecStart=/bin/bash "/home/ubuntu/xiaozhi-hub-server/scripts/start.sh"
+Restart=on-failure
+RestartSec=30
+StandardOutput=null
+
+[Install]
+WantedBy=default.target
