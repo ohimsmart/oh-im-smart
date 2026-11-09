@@ -94,11 +94,9 @@ tidy() {
         > /etc/systemd/journald.conf.d/thinksmart.conf
     install -d -g systemd-journal -m 2755 /var/log/journal
     systemctl restart systemd-journald
-    timedatectl set-timezone Asia/Shanghai
     # rsyslog wrote every journal line again into /var/log, outside the journal's cap (169 MB there)
     systemctl disable --now rsyslog.service 2>/dev/null || true
     rm -f /var/log/syslog* /var/log/auth.log* /var/log/kern.log* /var/log/user.log* /var/log/messages*
-    echo Asia/Shanghai > /etc/timezone
     # Earlier experiments: py-xiaozhi and the first chat page (replaced by thinksmart-client), Plasma-era helpers
     systemctl disable --now py-xiaozhi.service 2>/dev/null || true
     rm -f /etc/systemd/system/py-xiaozhi.service /usr/local/bin/thinksmart-chat.py /usr/local/bin/screen-wake-daemon.py.july

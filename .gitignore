@@ -6,3 +6,7 @@ codec-dmic/out/
 __pycache__/
 *.pyc
 .DS_Store
+
+# agent tooling state and raw review transcripts (local)
+.claude/
+docs/reviews/
