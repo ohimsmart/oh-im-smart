@@ -4,8 +4,9 @@
 #   fakeroot sh image/tests/make-fake-root.sh DIR
 # Also writes DIR/../template.yaml (the gateway's config template).
 set -eu
-# git run from a hook or another tool would otherwise act on that repository
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+# git run from a hook or another tool would otherwise act on that repository: no GIT_* variable
+# (GIT_DIR, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_CONFIG_PARAMETERS...) reaches git here
+for v in $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 # nor the developer's global or system git settings (hooksPath, signing...)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -19,10 +20,10 @@ mkdir -p etc/skel etc/sudoers.d etc/NetworkManager/system-connections etc/ssh li
     opt/thinksmart/envs/new opt/thinksmart/envs/old
 
 # the system layer, as image/device-setup.sh files puts it there
-grep -v -e '^#' -e '^[[:space:]]*$' -e '^require ' "$REPO/image/system-files.txt" | while read -r src dst _; do
+grep -v -e '^#' -e '^[[:space:]]*$' -e '^require ' "$REPO/image/system-files.txt" | while read -r src dst mode _; do
     [ "$src" = - ] && continue
     mkdir -p "$R${dst%/*}"
-    cp "$REPO/$src" "$R$dst"
+    install -m "$mode" "$REPO/$src" "$R$dst"
 done
 # the mother device's keep files differ from the repository's: sanitize must replace them
 echo 'SOURCES="https://github.com/justhalfbit/xiaozhi-thinksmart-client/releases/"' > etc/thinksmart-update.conf
@@ -121,10 +122,15 @@ mkdir -p $HUB/main/xiaozhi-server/data $HUB/scripts
 echo 'secret: 1' > $HUB/main/xiaozhi-server/data/.config.yaml
 echo 'MIT License, Copyright (c) justhalfbit, https://github.com/justhalfbit/xiaozhi-hub-server' > $HUB/LICENSE
 echo 'echo install' > $HUB/scripts/bootstrap.sh
+printf 'server:\n  LLM: ClaudeCLI\n' > $HUB/scripts/config.template.yaml
 echo 'print(1)' > $HUB/main/xiaozhi-server/app.py
+# the gateway's .venv as uv makes it: python linked to uv's, lib64 a link to a directory
+mkdir -p $HUB/main/xiaozhi-server/.venv/bin $HUB/main/xiaozhi-server/.venv/lib
+ln -s /home/ubuntu/.local/share/uv/python/bin/python3 $HUB/main/xiaozhi-server/.venv/bin/python
+ln -s lib $HUB/main/xiaozhi-server/.venv/lib64
 # the gateway checkout as the mother device has it: the published commit, plus an unpublished one
 # kept only by a tag, a mirror insteadOf, a hook; and a system-wide insteadOf
-printf 'main/xiaozhi-server/data/\nmain/xiaozhi-server/tmp/\n.env\n' > $HUB/.gitignore
+printf 'main/xiaozhi-server/data/\nmain/xiaozhi-server/tmp/\n.env\n.venv\n' > $HUB/.gitignore
 FG() { git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false -c tag.gpgsign=false -C $HUB "$@"; }
 FG init -q -b main
 FG remote add origin https://github.com/ohimsmart/oh-im-smart-gateway.git
@@ -158,4 +164,4 @@ echo 'https://github.com/justhalfbit/thinksmart-ubuntu-image' > opt/thinksmart/s
 
 chown -R 1000:1000 home/ubuntu
 chown -R 1001:1001 home/alice
-printf '  LLM: ClaudeCLI\n' > ../template.yaml
+cp $HUB/scripts/config.template.yaml ../template.yaml

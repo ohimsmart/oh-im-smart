@@ -1,6 +1,9 @@
 # Paths in the gateway checkout that git ignores and the image may carry, as
 # `git ls-files --others --ignored --exclude-standard --directory` prints them (spec §5.3 point 3).
 # check-rootfs.sh fails on any other ignored path: a .env, logs or a local database would otherwise
-# ship unseen, since git status does not list ignored files. sanitize-rootfs.sh writes these two.
+# ship unseen, since git status does not list ignored files.
+# sanitize-rootfs.sh writes these two
 main/xiaozhi-server/data/
 main/xiaozhi-server/tmp/
+# the gateway's Python environment (scripts/install.sh; scripts/start.sh runs $SERVER/.venv/bin/python)
+main/xiaozhi-server/.venv/

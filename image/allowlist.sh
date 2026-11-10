@@ -14,6 +14,13 @@ home_allowed() {
     return 1
 }
 
+# hub_config TEMPLATE: the gateway's data/.config.yaml for a new device, from its
+# scripts/config.template.yaml, as its install script writes it on a machine without Claude Code:
+# Claude API, key set in the admin page
+hub_config() {
+    sed 's/^\(  LLM: \)ClaudeCLI.*/\1ClaudeAPI          # 在管理后台填写 API Key/' "$1"
+}
+
 # provenance_uncovered ROOT LIST FILE: reads grep -n hits of FILE (line:content) on stdin and
 # prints "/path:content" for each one LIST does not allow. The path is FILE's, so a file name that
 # itself holds ":<digits>:" cannot pose as another path. LIST lines (tab separated):
