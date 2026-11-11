@@ -154,11 +154,16 @@ uncovered "$T/up.bad" -E '(github(usercontent)?\.com[/:]|githubusercontent\.com/
 uncovered "$T/own.bad" -wF -f "$T/ids"
 [ ! -s "$T/up.bad" ] || { bad "upstream URLs:"; head -20 "$T/up.bad"; }
 [ ! -s "$T/own.bad" ] || { bad "owner identifiers:"; head -20 "$T/own.bad"; }
+# and in file names, which a scan of contents does not see (no attribution is ever a file name)
+(cd "$R" && find . -xdev) > "$T/paths"
+search -wF -f "$T/ids" "$T/paths" > "$T/x"
+[ ! -s "$T/x" ] || bad "file names with an owner identifier: $(head -5 "$T/x" | tr '\n' ' ')"
 
 # --- accounts (§5.4)
 hash=$(cat "$S/ubuntu-password.hash")
-awk -F: -v h="$hash" '$1 == "ubuntu" && $2 == h {f = 1} END {exit !f}' "$R/etc/shadow" \
-    || bad "ubuntu's password hash is not ubuntu-password.hash"
+awk -F: -v h="$hash" '$1 == "ubuntu" && $2 == h && $3 ~ /^[1-9][0-9]*$/ && $4 "|" $5 "|" $6 "|" $7 "|" $8 "|" $9 == "0|99999|7|||" && NF == 9 {f = 1}
+    END {exit !f}' "$R/etc/shadow" \
+    || bad "ubuntu's password is not ubuntu-password.hash, set and never ageing, inactive or expired"
 awk -F: '$1 == "root" && $2 == "!" {f = 1} END {exit !f}' "$R/etc/shadow" || bad "root is not locked"
 others=$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "ubuntu" {print $1}' "$R/etc/passwd" "$R/etc/group" | sort -u | tr '\n' ' ')
 [ -z "$others" ] || bad "people or their groups besides ubuntu: $others"
@@ -179,6 +184,46 @@ fi
 [ ! -s "$T/x" ] || bad "group members without an account: $(tr '\n' ' ' < "$T/x")"
 awk -F: '$1 == "sudo" {n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == "ubuntu") f = 1} END {exit !f}' "$R/etc/group" \
     || bad "ubuntu is not in the sudo group (root is locked: no way to administer the device)"
+# and sudo without a password (the screen services run sudo unattended). Not a sudoers parser: the
+# policy must be one this check knows. /etc/sudoers holds only Ubuntu's stock Defaults and rules
+# (root, %admin, %sudo with a password) and ends in its @includedir; each file sudo reads from there
+# (sudo skips names with a dot or ending in ~) holds only ubuntu's NOPASSWD rule, read after the
+# stock ones, and one does. Anything else (another rule, an alias, a continued line) fails, for a
+# person to look at. Each file is read on its own, so one's last line cannot run into the next's.
+# sudo refuses a file or directory not root's or writable by others (a link is mode 777: refused too).
+sudo_policy() {
+    set -- "$R/etc/sudoers"
+    for f in "$R"/etc/sudoers.d/*; do
+        case ${f##*/} in *.*|*~) continue ;; esac
+        if [ -f "$f" ]; then set -- "$@" "$f"; fi
+    done
+    for f in "$R/etc/sudoers.d" "$@"; do
+        m=$(stat -c '%u:%a' "$f" 2>/dev/null) || m=missing
+        case $m in
+            0:*[2367]?|0:*[2367]) echo "${f#"$R"} is writable by others ($m): sudo refuses it" ;;
+            0:*) ;;
+            *) echo "${f#"$R"} is not root's ($m): sudo refuses it" ;;
+        esac
+    done
+    awk -v main="$R/etc/sudoers" '
+    # a comment, but #include... and #1000 or #-1 (uids) are not
+    /^[ \t]*$/ || (/^[ \t]*#/ && !/^[ \t]*#(include|[-+0-9])/) {next}
+    {l = $0; gsub(/[ \t]+/, " ", l); sub(/^ /, "", l); sub(/ $/, "", l); gsub(/ ?= ?/, "=", l); gsub(/: /, ":", l)}
+    FILENAME == main {
+        # the include as Ubuntu writes it: sudo reads an indented #includedir as a comment
+        last = ($0 ~ /^[@#]includedir[ \t]+\/etc\/sudoers\.d[ \t]*$/)
+        if (last || l ~ /^Defaults (env_reset|mail_badpass|use_pty|secure_path="\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin(:\/snap\/bin)?")$/ || l ~ /^(root|%admin|%sudo) ALL=\(ALL(:ALL)?\) ALL$/) next
+        print "/etc/sudoers: " $0; next
+    }
+    l ~ /^ubuntu ALL=(\(ALL(:ALL)?\) ?)?NOPASSWD:ALL$/ {ok = 1; next}
+    {f = FILENAME; sub(/.*\/etc\//, "/etc/", f); print f ": " $0}
+    END {
+        if (!last) print "/etc/sudoers does not end in @includedir /etc/sudoers.d"
+        if (!ok) print "no ubuntu ALL=(ALL) NOPASSWD:ALL in /etc/sudoers.d"
+    }' "$@"
+}
+sudo_out=$(sudo_policy)
+[ -z "$sudo_out" ] || bad "sudo policy this check does not know (the screen services need ubuntu's passwordless sudo): $(printf '%s' "$sudo_out" | head -5 | tr '\n' ';')"
 [ "$(names "$R/home")" = "ubuntu " ] || bad "/home holds more than ubuntu: $(names "$R/home")"
 for f in shadow- passwd- group- gshadow- subuid- subgid-; do
     absent "$R/etc/$f" || bad "/etc/$f is still there"

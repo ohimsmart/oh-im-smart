@@ -39,7 +39,7 @@ E
 cat > etc/shadow <<'E'
 root:$6$old$roothash:19000:0:99999:7:::
 www-data:*:19000:0:99999:7:::
-ubuntu:$6$old$ubuntuhash:19000:0:99999:7:::
+ubuntu:$6$old$ubuntuhash:19000:0:90:7:14:19500:
 alice:$6$old$alicehash:19000:0:99999:7:::
 nobody:*:19000:0:99999:7:::
 E
@@ -66,6 +66,8 @@ cp etc/subuid etc/subgid
 for f in passwd shadow group gshadow subuid subgid; do cp "etc/$f" "etc/$f-"; done
 chmod 640 etc/shadow etc/gshadow
 
+# Ubuntu's stock sudoers: the sudo group with a password, then sudoers.d
+printf 'Defaults\tenv_reset\nDefaults\tsecure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\nDefaults\tuse_pty\nroot\tALL=(ALL:ALL) ALL\n%%sudo\tALL=(ALL:ALL) ALL\n@includedir /etc/sudoers.d\n' > etc/sudoers
 echo 'alice ALL=(ALL) NOPASSWD:ALL' > etc/sudoers.d/alice
 echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > etc/sudoers.d/90-ubuntu
 echo '* * * * * curl example.com' > var/spool/cron/crontabs/alice
