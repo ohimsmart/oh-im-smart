@@ -243,6 +243,8 @@ broken "ubuntu's sudoers file owned by ubuntu" "chown 1000 '$R/etc/sudoers.d/90-
 broken "a group-writable /etc/sudoers.d" "chmod g+w '$R/etc/sudoers.d'" "chmod g-w '$R/etc/sudoers.d'"
 broken "an indented #includedir, which sudo reads as a comment" "sed -i '\$s/^@/ #/' '$R/etc/sudoers'" "sed -i '\$s/^ #/@/' '$R/etc/sudoers'"
 broken "a negative uid line, which visudo rejects" "echo '#-1 this is invalid' > '$R/etc/sudoers.d/99-neg'" "rm '$R/etc/sudoers.d/99-neg'"
+broken "a removed account's file outside its home" "echo x > '$R/opt/diary'; chown 1001 '$R/opt/diary'" "rm '$R/opt/diary'"
+broken "a removed group's file" "echo x > '$R/opt/diary'; chown 0:1001 '$R/opt/diary'" "rm '$R/opt/diary'"
 broken "ubuntu without passwordless sudo" "mv '$R/etc/sudoers.d/90-ubuntu' '$T/90-ubuntu'" "mv '$T/90-ubuntu' '$R/etc/sudoers.d/90-ubuntu'"
 broken "a second env" "mkdir '$R/opt/thinksmart/envs/extra'" "rmdir '$R/opt/thinksmart/envs/extra'"
 if check >/dev/null 2>&1; then ok "every break was put back"; else no "every break was put back"; fi
@@ -283,6 +285,12 @@ rc=0; sh "$IMG/check-rootfs.sh" "$R" "$T/ids" "$T/norepo" >/dev/null 2>&1 || rc=
 if [ "$rc" = 2 ]; then ok "check-rootfs exits 2 without system-files.txt"; else no "check-rootfs exits 2 without system-files.txt (got $rc)"; fi
 
 # an account whose home is outside /home: sanitize stops instead of leaving it behind
+# a root-owned file whose name holds a newline is no stray owner
+nl=$(printf 'nl\nname')
+echo x > "$R/opt/$nl"
+if check >/dev/null 2>&1; then ok "a file name with a newline passes"; else no "a file name with a newline passes"; fi
+rm "$R/opt/$nl"
+
 R=$T/root2
 sh "$IMG/tests/make-fake-root.sh" "$R"
 echo 'bob:x:1002:1002:Bob:/srv/bob:/bin/sh' >> "$R/etc/passwd"

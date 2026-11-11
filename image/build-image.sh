@@ -24,6 +24,8 @@
 # Runs everything that needs root inside a container (image/Dockerfile); the work tree lives in a
 # Docker volume so ownership, devices and capabilities survive.
 set -euo pipefail
+# no GIT_* variable (GIT_DIR, GIT_INDEX_FILE...) points git below at another repository or index
+for v in $(compgen -e | grep '^GIT_' || true); do unset "$v"; done
 WORK=$(cd "${1:?work dir}" && pwd); OUT=${2:?out dir}; HUB=$(cd "${3:?hub repo}" && pwd)
 SECRETS=${4:?SECRETS_FILE (one secret per line, outside any repository) or --test-image}
 if [ "$SECRETS" != --test-image ]; then
@@ -60,10 +62,16 @@ HUB_MAIN=${HUB_MAIN:-origin/main}
 git -C "$HUB" merge-base --is-ancestor "$HUB_COMMIT" "$HUB_MAIN" || {
     echo "hub commit $HUB_COMMIT is not on $HUB_MAIN: merge it into main (fast-forward) first"; exit 1; }
 git -C "$HUB" show "$HUB_COMMIT:scripts/config.template.yaml" > "$WORK/hub-config.template.yaml"
-if [ "$SECRETS" = --test-image ]; then
-    NAME=$NAME-TEST-DO-NOT-PUBLISH; : > "$WORK/secrets.txt"
-else
-    cp "$SECRETS" "$WORK/secrets.txt"
+if [ "$SECRETS" = --test-image ]; then : > "$WORK/secrets.txt"; else cp "$SECRETS" "$WORK/secrets.txt"; fi
+# no owner-secret check, or versions no release carries: not a release
+if [ "$SECRETS" = --test-image ] || [ "${ALLOW_UNRELEASED:-}" = 1 ]; then
+    NAME=$NAME-TEST-DO-NOT-PUBLISH
+elif ! st=$(git -C "$HERE/.." status --porcelain) || ! lv=$(git -C "$HERE/.." ls-files -v) \
+        || [ -n "$st" ] || grep -q '^[a-zS]' <<< "$lv"; then
+    # /repo and /s below are the work tree: a release carries what is committed, nothing else; git
+    # failing refuses too (ls-files -v: lowercase is assume-unchanged, S skip-worktree, edits git
+    # status does not show)
+    echo "$HERE/..: uncommitted changes: commit them first (or build a test image)"; exit 1
 fi
 
 # the DMIC fix must be the codec-dmic build (it only exists on the device and in codec-dmic/out)
@@ -79,7 +87,7 @@ set -euo pipefail
 BOOT_UUID=35bca636-764e-4f53-b5e5-96eb774eb19e
 ROOT_UUID=8b6cd6d2-cf64-4279-b1cc-426345d5b822
 BOOT_START=2048 BOOT_SECTORS=509952 ROOT_START=512000
-log() { echo "== $*"; }
+log() { echo "== $*  ($(date +%T))"; }
 
 log "unpack"
 rm -rf /w/root /w/boot /w/*.img /w/caps.txt
@@ -171,6 +179,14 @@ log "privacy check over the file tree"
 # a test image of a generically named device has nothing to look for
 if grep -q '[^[:space:]]' /w/secrets.txt; then PRIV=/w/secrets.txt; else PRIV=--test-image; fi
 sh /s/check-image-privacy.sh $R $PRIV
+log "privacy check over the boot files and the unpacked initramfs"
+sh /s/check-image-privacy.sh /w/boot $PRIV
+# the initramfs is gzip (the NCM member too): the scan of the raw image cannot see inside it
+for f in /w/boot/initramfs*; do
+    gzip -dc "$f" > /w/initramfs.raw
+    sh /s/check-image-privacy.sh /w/initramfs.raw $PRIV
+done
+rm -f /w/initramfs.raw
 
 log "capabilities to check after mke2fs"
 getcap -r $R/usr 2>/dev/null | sed "s|^$R||" > /w/caps.txt || true

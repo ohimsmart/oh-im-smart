@@ -225,6 +225,12 @@ sudo_policy() {
 sudo_out=$(sudo_policy)
 [ -z "$sudo_out" ] || bad "sudo policy this check does not know (the screen services need ubuntu's passwordless sudo): $(printf '%s' "$sudo_out" | head -5 | tr '\n' ';')"
 [ "$(names "$R/home")" = "ubuntu " ] || bad "/home holds more than ubuntu: $(names "$R/home")"
+# files of an owner or group the image has no entry for: a removed account's, outside its home
+# (ids only, no names: a file name can hold a newline)
+find "$R" -xdev -printf 'u%U\ng%G\n' | sort -u > "$T/owners"
+awk -F: 'FILENAME == ARGV[1] {k["u" $3]; next} FILENAME == ARGV[2] {k["g" $3]; next} !($0 in k)' \
+    "$R/etc/passwd" "$R/etc/group" "$T/owners" > "$T/x"
+[ ! -s "$T/x" ] || bad "files of an owner (u) or group (g) id with no /etc/passwd or /etc/group entry: $(tr '\n' ' ' < "$T/x")(find them with find / -xdev -uid ID, -gid ID)"
 for f in shadow- passwd- group- gshadow- subuid- subgid-; do
     absent "$R/etc/$f" || bad "/etc/$f is still there"
 done
