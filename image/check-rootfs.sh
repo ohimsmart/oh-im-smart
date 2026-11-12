@@ -26,14 +26,6 @@ fail=0
 bad() { echo "check-rootfs: $*"; fail=1; }
 # neither a file nor a link (test -e follows a link on the build host, not in the image)
 absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
-# a path inside the image with its links followed there (an absolute target is the image's /)
-inroot() {
-    _p=$1; _i=0
-    while [ -L "$_p" ] && [ "$_i" -lt 20 ]; do
-        _l=$(readlink "$_p"); case $_l in /*) _p=$R$_l ;; *) _p=${_p%/*}/$_l ;; esac; _i=$((_i + 1))
-    done
-    printf '%s\n' "$_p"
-}
 # grep that tells "no match" (1) from an error (2+)
 search() { rc=0; grep "$@" || rc=$?; [ "$rc" -le 1 ] || { echo "check-rootfs: grep failed: $*"; exit 2; }; }
 # the names in a directory, sorted, on one line; "(unreadable)" when find fails, never nothing
@@ -119,7 +111,7 @@ hub_config "$HUB/scripts/config.template.yaml" > "$T/config.yaml" \
     || { echo "check-rootfs: no scripts/config.template.yaml in the gateway"; exit 2; }
 cmp -s "$T/config.yaml" "$SRV/data/.config.yaml" || bad "the gateway's data/.config.yaml is not its template's"
 { [ -d "$SRV/tmp" ] && [ ! -L "$SRV/tmp" ] && [ -z "$(names "$SRV/tmp")" ]; } || bad "the gateway's tmp/ is not an empty directory"
-py=$(inroot "$SRV/.venv/bin/python")
+py=$(inroot "$R" "$SRV/.venv/bin/python")
 { [ -d "$SRV/.venv" ] && [ ! -L "$SRV/.venv" ] && [ -f "$py" ] && [ ! -L "$py" ]; } \
     || bad "the gateway's .venv has no Python (scripts/start.sh runs .venv/bin/python)"
 
@@ -238,6 +230,24 @@ done
 for d in var/spool/cron/crontabs var/mail; do
     if [ -d "$R/$d" ] && [ -n "$(names "$R/$d")" ]; then bad "/$d is not empty: $(names "$R/$d")"; fi
 done
+# no link where sanitize deleted or wrote: the checks below would read through it into the container
+out_dir_links "$R" "$T/links" > "$T/x" || bad "$(cat "$T/x")"
+[ ! -s "$T/x" ] || bad "links out of the root: $(head -5 "$T/x" | tr '\n' ' ')"
+for f in $WRITTEN_FILES; do
+    [ ! -L "$R/$f" ] || bad "/$f is a link"
+done
+# ubuntu's account says Ubuntu: no owner's name, photo or e-mail
+awk -F: '$1 == "ubuntu" && $5 == "Ubuntu" {f = 1} END {exit !f}' "$R/etc/passwd" \
+    || bad "ubuntu's name in /etc/passwd is not Ubuntu (the mother device owner's?)"
+absent "$R/var/lib/AccountsService/icons/ubuntu" || bad "ubuntu's AccountsService photo is still there"
+U=$R/var/lib/AccountsService/users/ubuntu
+if [ -e "$U" ] || [ -L "$U" ]; then
+    # (awk exits 2 on a file it cannot read: that fails too)
+    if [ -L "$U" ] || [ ! -f "$U" ]; then bad "/var/lib/AccountsService/users/ubuntu is not a regular file"
+    elif ! awk "!($ACCOUNTS_KEEP) {f = 1} END {exit f}" "$U"; then
+        bad "ubuntu's AccountsService entry holds more than its session and language settings"
+    fi
+fi
 # files named for an account: a removed account's settings are no one's now
 for d in var/lib/AccountsService/users var/lib/AccountsService/icons var/lib/sudo/lectured; do
     if [ -d "$R/$d" ]; then
@@ -322,13 +332,24 @@ done
 
 # --- host name, time zone, NTP (§5.4, §5.5)
 [ "$(cat "$R/etc/hostname")" = thinksmart ] || bad "hostname is '$(cat "$R/etc/hostname")'"
-if [ "$(grep -c '^127\.0\.1\.1[[:space:]]' "$R/etc/hosts")" != 1 ] || ! grep -qx '127\.0\.1\.1[[:space:]]*thinksmart' "$R/etc/hosts"; then
-    bad "/etc/hosts has no single 127.0.1.1 thinksmart line"
-fi
+# (none of them a link: checked with WRITTEN_FILES above)
+{ [ -f "$R/etc/machine-id" ] && [ ! -s "$R/etc/machine-id" ]; } || bad "/etc/machine-id is not an empty file (each device makes its own)"
+stock_hosts | cmp -s - "$R/etc/hosts" || bad "/etc/hosts is not Ubuntu's stock file for thinksmart"
+absent "$R/etc/machine-info" || bad "/etc/machine-info is still there"
 [ "$(cat "$R/etc/timezone")" = Etc/UTC ] || bad "timezone is '$(cat "$R/etc/timezone")'"
 [ "$(readlink "$R/etc/localtime")" = /usr/share/zoneinfo/Etc/UTC ] || bad "/etc/localtime is not Etc/UTC"
 grep -qxF 'NTP=ntp.aliyun.com ntp.tencent.com cn.pool.ntp.org pool.ntp.org ntp.ubuntu.com' \
     "$R/etc/systemd/timesyncd.conf.d/thinksmart.conf" || bad "timesyncd: not the NTP= line of kiosk/timesyncd.conf"
+# no other drop-in (in /etc after ours, or in /run, /usr/local/lib, /usr/lib) may change NTP= again;
+# a link there would hide its drop-ins from find, and names says "(unreadable)" when it cannot list
+for t in etc run usr/local/lib usr/lib; do
+    p=$R/$t/systemd/timesyncd.conf.d
+    if [ "$t" = etc ]; then want='thinksmart.conf '; else want=; fi
+    if [ -L "$p" ]; then bad "/$t/systemd/timesyncd.conf.d is a link"
+    elif [ -e "$p" ] && [ "$(names "$p")" != "$want" ]; then
+        bad "timesyncd drop-ins other than ours in /$t/systemd/timesyncd.conf.d: $(names "$p")"
+    fi
+done
 
 # --- updater: nothing half done, no backup, no previous client (§5.3 point 4a)
 for f in pending.json system-pending.json; do

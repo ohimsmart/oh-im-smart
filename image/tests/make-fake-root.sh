@@ -32,7 +32,7 @@ echo '#HELP_URL="https://github.com/justhalfbit/xiaozhi-hub-server"' > etc/think
 cat > etc/passwd <<'E'
 root:x:0:0:root:/root:/bin/bash
 www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
-ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash
+ubuntu:x:1000:1000:Mother Owner,,,:/home/ubuntu:/bin/bash
 alice:x:1001:1001:Alice:/home/alice:/bin/bash
 nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
 E
@@ -77,7 +77,8 @@ printf '# skel bashrc\n' > etc/skel/.bashrc
 printf '# skel profile\n' > etc/skel/.profile
 printf '# skel logout\n' > etc/skel/.bash_logout
 echo mother-host > etc/hostname
-printf '127.0.0.1\tlocalhost\n127.0.1.1\tmother-host\n' > etc/hosts
+printf '127.0.0.1\tlocalhost\n127.0.1.1\tmother-host\n192.168.1.20\tnas.home\n' > etc/hosts
+echo 'PRETTY_HOSTNAME=Mother Owner tablet' > etc/machine-info
 echo Asia/Shanghai > etc/timezone
 : > usr/share/zoneinfo/Etc/UTC
 ln -s /usr/share/zoneinfo/Asia/Shanghai etc/localtime
@@ -90,6 +91,9 @@ echo 'alice' > home/alice/notes
 mkdir -p home/retired; echo 'diary' > home/retired/diary.txt
 mkdir -p var/lib/AccountsService/users var/lib/plocate
 echo '[User]' > var/lib/AccountsService/users/alice
+mkdir -p var/lib/AccountsService/icons
+printf '[User]\nSession=plasma\nIcon=/var/lib/AccountsService/icons/ubuntu\nEmail=owner@example.invalid\nSystemAccount=false\n' > var/lib/AccountsService/users/ubuntu
+echo 'photo' > var/lib/AccountsService/icons/ubuntu
 echo 'every file name' > var/lib/plocate/plocate.db
 
 H=home/ubuntu
@@ -114,6 +118,10 @@ ln -s ../thinksmart-mic.service $U/pipewire-pulse.service.wants/thinksmart-mic.s
 echo old > $H/.config/pipewire/pipewire.conf.d/20-experiment.conf
 echo en > $H/.config/thinksmart-kiosk/lang
 echo py > $H/.local/share/uv/python/bin/python3
+# uv 0.13: a Python minor version is a link to the installed release, and a .venv's python goes through it
+mkdir -p $H/.local/share/uv/python/cpython-3.12.11-linux-aarch64-gnu/bin
+echo py > $H/.local/share/uv/python/cpython-3.12.11-linux-aarch64-gnu/bin/python3.12
+ln -s /home/ubuntu/.local/share/uv/python/cpython-3.12.11-linux-aarch64-gnu $H/.local/share/uv/python/cpython-3.12-linux-aarch64-gnu
 echo uv > $H/.local/bin/uv
 echo uvx > $H/.local/bin/uvx
 echo 'token' > $H/.local/bin/my-script
@@ -128,7 +136,7 @@ printf 'server:\n  LLM: ClaudeCLI\n' > $HUB/scripts/config.template.yaml
 echo 'print(1)' > $HUB/main/xiaozhi-server/app.py
 # the gateway's .venv as uv makes it: python linked to uv's, lib64 a link to a directory
 mkdir -p $HUB/main/xiaozhi-server/.venv/bin $HUB/main/xiaozhi-server/.venv/lib
-ln -s /home/ubuntu/.local/share/uv/python/bin/python3 $HUB/main/xiaozhi-server/.venv/bin/python
+ln -s /home/ubuntu/.local/share/uv/python/cpython-3.12-linux-aarch64-gnu/bin/python3.12 $HUB/main/xiaozhi-server/.venv/bin/python
 ln -s lib $HUB/main/xiaozhi-server/.venv/lib64
 # the gateway checkout as the mother device has it: the published commit, plus an unpublished one
 # kept only by a tag, a mirror insteadOf, a hook; and a system-wide insteadOf

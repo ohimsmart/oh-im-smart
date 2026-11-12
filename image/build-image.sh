@@ -11,7 +11,7 @@
 #            --test-image instead skips that check and names the image ...-TEST-DO-NOT-PUBLISH.
 # HUB_MAIN   (environment, default origin/main, fetched first) the hub's published main: the shipped
 #            commit must be on it, or every device's scripts/update.sh (git merge --ff-only) fails.
-#            HUB_MAIN=main checks against the local main before it is pushed (push before releasing).
+#            HUB_MAIN=main checks against the local main before it is pushed: test images only.
 # RELEASE_MANIFEST (environment) the latest.json of the newest online update (a file, or the URL
 #            https://github.com/ohimsmart/oh-im-smart-client/releases/latest/download/latest.json).
 #            The image must carry exactly that client and system layer version, so a freshly flashed
@@ -58,7 +58,16 @@ GATEWAY_URL=https://github.com/ohimsmart/oh-im-smart-gateway.git
 [ "$(git -C "$HUB" remote get-url origin)" = "$GATEWAY_URL" ] || {
     echo "$HUB: origin is not $GATEWAY_URL (the shipped commit must be on our gateway's main)"; exit 1; }
 HUB_MAIN=${HUB_MAIN:-origin/main}
-[ "$HUB_MAIN" = origin/main ] && git -C "$HUB" fetch -q origin main
+# a commit checked against the local main only may never reach GitHub: devices could not update
+if [ "$HUB_MAIN" != origin/main ] && [ "$SECRETS" != --test-image ] && [ "${ALLOW_UNRELEASED:-}" != 1 ]; then
+    echo "HUB_MAIN=$HUB_MAIN is for test images only (--test-image or ALLOW_UNRELEASED=1)"; exit 1
+fi
+if [ "$HUB_MAIN" = origin/main ]; then
+    git -C "$HUB" fetch -q origin +refs/heads/main:refs/remotes/origin/main
+    # the published main itself, not whatever the fetch left in the clone
+    [ "$(git -C "$HUB" rev-parse refs/remotes/origin/main)" = "$(git -C "$HUB" ls-remote origin refs/heads/main | cut -f1)" ] \
+        || { echo "$HUB: origin/main is not GitHub's main after the fetch"; exit 1; }
+fi
 git -C "$HUB" merge-base --is-ancestor "$HUB_COMMIT" "$HUB_MAIN" || {
     echo "hub commit $HUB_COMMIT is not on $HUB_MAIN: merge it into main (fast-forward) first"; exit 1; }
 git -C "$HUB" show "$HUB_COMMIT:scripts/config.template.yaml" > "$WORK/hub-config.template.yaml"

@@ -17,7 +17,7 @@ if [ ! -d "$R/etc" ] || [ ! -d "$R/home/ubuntu" ]; then echo "$R does not look l
 # Deletions and writes below go through whatever links the capture holds. In the container an
 # absolute link resolves there, where /w (the work volume) and /out (OUT_DIR) are the build's own:
 # no link may lead into them from outside the copy. (SANITIZE_GUARD: those places, for the tests.)
-L=$(mktemp); trap 'rm -f "$L"' EXIT
+L=$(mktemp); trap 'rm -f "$L" "$L.links"' EXIT
 find "$R" -xdev -type l | while IFS= read -r l; do
     t=$(readlink -f "$l") || continue
     case $t in "$R"|"$R"/*) continue ;; esac
@@ -31,6 +31,15 @@ S=$(cd "$(dirname "$0")" && pwd)
 HOME_ALLOW=$S/home-allowlist.txt
 # shellcheck source=image/allowlist.sh
 . "$S/allowlist.sh"
+# links that would take the changes below into the build container instead of the image
+out_dir_links "$R" "$L.links" > "$L" || { cat "$L"; rm -f "$L.links"; exit 1; }
+rm -f "$L.links"
+for f in $WRITTEN_FILES; do
+    if [ -L "$R/$f" ]; then echo "/$f -> $(readlink "$R/$f")"; fi
+done >> "$L"
+if [ -s "$L" ]; then
+    echo "sanitize: links where it deletes or writes (replace them on the device with what they point at):"; cat "$L"; exit 1
+fi
 H=$R/home/ubuntu
 HUB=$H/xiaozhi-hub-server
 SRV=$HUB/main/xiaozhi-server
@@ -91,6 +100,8 @@ edit() {
     f=$R/etc/$1
     [ -e "$f" ] || return 0
     case $2 in group|gshadow) rows=$groups ;; *) rows=$people ;; esac
+    # (the scratch file too: one the capture holds as a link would take the write elsewhere)
+    rm -f "$f.sanitize"
     ROWS=$rows PEOPLE=$people HASH=$(cat "$S/ubuntu-password.hash") DAYS=$(($(date +%s) / 86400)) \
         awk -F: -v OFS=: -v kind="$2" '
         BEGIN {
@@ -106,13 +117,25 @@ edit() {
         # ageing and expiry from the mother device go with its password: expired, ubuntu could not log in
         kind == "shadow" && $1 == "ubuntu" { $2 = ENVIRON["HASH"]; $3 = ENVIRON["DAYS"]; $4 = 0; $5 = 99999; $6 = 7; $7 = ""; $8 = ""; $9 = "" }
         kind == "shadow" && $1 == "root" { $2 = "!" }
+        kind == "passwd" && $1 == "ubuntu" { $5 = "Ubuntu" }
         kind == "group" { $4 = strip($4) }
         kind == "gshadow" { $3 = strip($3); $4 = strip($4) }
         { print }' "$f" > "$f.sanitize"
     cat "$f.sanitize" > "$f"
     rm -f "$f.sanitize"
 }
-edit passwd plain; edit shadow shadow; edit group group; edit gshadow gshadow; edit subuid plain; edit subgid plain
+edit passwd passwd; edit shadow shadow; edit group group; edit gshadow gshadow; edit subuid plain; edit subgid plain
+# ubuntu's name (above), photo and e-mail are the mother device owner's: the image's ubuntu keeps
+# only its session and language settings (not a link: checked at the top; a directory there fails
+# check-rootfs)
+A=$R/var/lib/AccountsService
+rm -f "$A/icons/ubuntu"
+if [ -f "$A/users/ubuntu" ]; then
+    rm -f "$A/users/ubuntu.sanitize"
+    awk "$ACCOUNTS_KEEP" "$A/users/ubuntu" > "$A/users/ubuntu.sanitize"
+    cat "$A/users/ubuntu.sanitize" > "$A/users/ubuntu"
+    rm -f "$A/users/ubuntu.sanitize"
+fi
 rm -f "$R"/etc/shadow- "$R"/etc/passwd- "$R"/etc/group- "$R"/etc/gshadow- "$R"/etc/subuid- "$R"/etc/subgid-
 # what no account owns any more: a home left by userdel without -r, or by an account removed earlier
 for d in "$R"/home/* "$R"/home/.[!.]* "$R"/home/..?*; do
@@ -122,9 +145,11 @@ done
 rm -f "$R/var/lib/plocate/plocate.db" "$R/var/lib/mlocate/mlocate.db"
 
 say "host name and time zone: the public defaults"
+# /etc/hosts whole: the owner's LAN names in it are no one else's (none of these is a link: checked at
+# the top)
+rm -f "$R/etc/machine-info"
 printf 'thinksmart\n' > "$R/etc/hostname"
-sed -i '/^127\.0\.1\.1[[:space:]]/d' "$R/etc/hosts"
-printf '127.0.1.1\tthinksmart\n' >> "$R/etc/hosts"
+stock_hosts > "$R/etc/hosts"
 printf 'Etc/UTC\n' > "$R/etc/timezone"
 ln -sfn /usr/share/zoneinfo/Etc/UTC "$R/etc/localtime"
 

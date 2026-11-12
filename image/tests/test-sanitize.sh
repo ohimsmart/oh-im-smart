@@ -62,6 +62,13 @@ nt "private group www-data gone" grep -q '^www-data:' "$R/etc/group"
 nt "alice's home gone" test -e "$R/home/alice"
 nt "a home no account owns gone" test -e "$R/home/retired"
 nt "alice's AccountsService entry gone" test -e "$R/var/lib/AccountsService/users/alice"
+t "ubuntu's name is Ubuntu" grep -qx 'ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash' "$R/etc/passwd"
+nt "ubuntu's photo gone" test -e "$R/var/lib/AccountsService/icons/ubuntu"
+nt "ubuntu's e-mail and photo path gone" grep -qE '^(Email|Icon)=' "$R/var/lib/AccountsService/users/ubuntu"
+t "ubuntu's session kept" grep -qx 'Session=plasma' "$R/var/lib/AccountsService/users/ubuntu"
+# shellcheck disable=SC2016 # the inner sh expands them
+t "hosts is Ubuntu's stock file" sh -c '. "$1/allowlist.sh"; stock_hosts | cmp -s - "$2/etc/hosts"' sh "$IMG" "$R"
+nt "machine-info gone" test -e "$R/etc/machine-info"
 nt "locate database gone" test -e "$R/var/lib/plocate/plocate.db"
 nt "alice's crontab gone" test -e "$R/var/spool/cron/crontabs/alice"
 nt "alice's mail gone" test -e "$R/var/mail/alice"
@@ -216,8 +223,18 @@ broken "the client's env missing" "mv '$R/opt/thinksmart/envs/new' '$T/env'" "mv
 broken "/etc/gitconfig as a link into the image" "ln -s /home/ubuntu/.local/share/uv/gitconfig '$R/etc/gitconfig'" "rm '$R/etc/gitconfig'"
 broken "a pending update as a link" "ln -s /nonexistent '$R/var/lib/thinksmart-update/pending.json'" "rm '$R/var/lib/thinksmart-update/pending.json'"
 broken "the gateway without its .venv" "mv '$HUB/main/xiaozhi-server/.venv' '$T/hub-venv'" "mv '$T/hub-venv' '$HUB/main/xiaozhi-server/.venv'"
-broken "the gateway's Python missing" "mv '$R/home/ubuntu/.local/share/uv/python/bin/python3' '$T/py3'" \
-    "mv '$T/py3' '$R/home/ubuntu/.local/share/uv/python/bin/python3'"
+# (a chain of directory links in the middle of the path: the kernel gives up after 40)
+broken "the gateway's Python behind 42 links" \
+    "cd '$HUB/main/xiaozhi-server/.venv' && mv bin/python python.orig && echo py > bin/python.real && ln -s ../d1/python.real bin/python && i=1 && while [ \$i -le 40 ]; do ln -s d\$((i + 1)) d\$i; i=\$((i + 1)); done && ln -s bin d41" \
+    "cd '$HUB/main/xiaozhi-server/.venv' && rm bin/python bin/python.real d[0-9]* && mv python.orig bin/python"
+broken "the gateway's Python through file/.." \
+    "cd '$HUB/main/xiaozhi-server/.venv/bin' && mv python ../python.orig && echo py > python.real && ln -s python.real/../python.real python" \
+    "cd '$HUB/main/xiaozhi-server/.venv/bin' && rm python python.real && mv ../python.orig python"
+broken "the gateway's Python through file/." \
+    "cd '$HUB/main/xiaozhi-server/.venv/bin' && mv python ../python.orig && echo py > python.real && ln -s python.real/. python" \
+    "cd '$HUB/main/xiaozhi-server/.venv/bin' && rm python python.real && mv ../python.orig python"
+broken "the gateway's Python missing" "mv '$R/home/ubuntu/.local/share/uv/python/cpython-3.12.11-linux-aarch64-gnu/bin/python3.12' '$T/py3'" \
+    "mv '$T/py3' '$R/home/ubuntu/.local/share/uv/python/cpython-3.12.11-linux-aarch64-gnu/bin/python3.12'"
 broken "the gateway on a detached HEAD" "G -c core.logAllRefUpdates=false checkout -q --detach" "G -c core.logAllRefUpdates=false checkout -q main"
 broken "an unpublished commit on main" \
     "G -c core.logAllRefUpdates=false update-ref refs/heads/main \$(G -c user.name=t -c user.email=t@example.invalid commit-tree -m private -p HEAD 'HEAD^{tree}')" \
@@ -245,6 +262,30 @@ broken "an indented #includedir, which sudo reads as a comment" "sed -i '\$s/^@/
 broken "a negative uid line, which visudo rejects" "echo '#-1 this is invalid' > '$R/etc/sudoers.d/99-neg'" "rm '$R/etc/sudoers.d/99-neg'"
 broken "a removed account's file outside its home" "echo x > '$R/opt/diary'; chown 1001 '$R/opt/diary'" "rm '$R/opt/diary'"
 broken "a removed group's file" "echo x > '$R/opt/diary'; chown 0:1001 '$R/opt/diary'" "rm '$R/opt/diary'"
+# shellcheck disable=SC2016 # the inner sh expands them
+# (|| : so the run on the old allowlist.sh, which has no stock_hosts, gets to its failures;
+# "hosts is Ubuntu's stock file" fails when stock_hosts does)
+sh -c '. "$1/allowlist.sh"; stock_hosts' sh "$IMG" > "$T/stock-hosts" || :
+broken "ubuntu named after the owner" "sed -i 's/^ubuntu:x:1000:1000:Ubuntu:/ubuntu:x:1000:1000:Mother Owner:/' '$R/etc/passwd'" \
+    "sed -i 's/^ubuntu:x:1000:1000:Mother Owner:/ubuntu:x:1000:1000:Ubuntu:/' '$R/etc/passwd'"
+broken "ubuntu's AccountsService photo" "echo photo > '$R/var/lib/AccountsService/icons/ubuntu'" "rm '$R/var/lib/AccountsService/icons/ubuntu'"
+broken "an e-mail in ubuntu's AccountsService entry" "echo Email=owner@example.invalid >> '$R/var/lib/AccountsService/users/ubuntu'" "sed -i '\$d' '$R/var/lib/AccountsService/users/ubuntu'"
+broken "ubuntu's AccountsService entry as a link" "mv '$R/var/lib/AccountsService/users/ubuntu' '$T/as-ubuntu'; ln -s /etc/passwd '$R/var/lib/AccountsService/users/ubuntu'" \
+    "rm '$R/var/lib/AccountsService/users/ubuntu'; mv '$T/as-ubuntu' '$R/var/lib/AccountsService/users/ubuntu'"
+broken "a LAN name in /etc/hosts" "echo '192.168.1.20 nas.home' >> '$R/etc/hosts'" "sed -i '\$d' '$R/etc/hosts'"
+broken "/etc/machine-info" "echo 'PRETTY_HOSTNAME=x' > '$R/etc/machine-info'" "rm '$R/etc/machine-info'"
+broken "a name after ubuntu's session" "sed -i 's/^Session=plasma$/Session=plasma RealName=Owner/' '$R/var/lib/AccountsService/users/ubuntu'" \
+    "sed -i 's/^Session=plasma RealName=Owner$/Session=plasma/' '$R/var/lib/AccountsService/users/ubuntu'"
+broken "/etc/hosts as a link" "mv '$R/etc/hosts' '$T/hosts'; ln -s '$T/stock-hosts' '$R/etc/hosts'" "rm '$R/etc/hosts'; mv '$T/hosts' '$R/etc/hosts'"
+broken "a timesyncd drop-in after ours" "echo 'NTP=time.example.invalid' > '$R/etc/systemd/timesyncd.conf.d/zz-other.conf'" "rm '$R/etc/systemd/timesyncd.conf.d/zz-other.conf'"
+broken "AccountsService icons as a link" "mv '$R/var/lib/AccountsService/icons' '$T/icons-dir'; ln -s '$T/icons-dir' '$R/var/lib/AccountsService/icons'" \
+    "rm '$R/var/lib/AccountsService/icons'; mv '$T/icons-dir' '$R/var/lib/AccountsService/icons'"
+broken "a machine-id" "echo 0123456789abcdef0123456789abcdef > '$R/etc/machine-id'" ": > '$R/etc/machine-id'"
+broken "a timesyncd drop-in directory as a link" "mkdir -p '$R/run/systemd' '$R/usr/share/td'; echo 'NTP=time.example.invalid' > '$R/usr/share/td/a.conf'; ln -s ../../usr/share/td '$R/run/systemd/timesyncd.conf.d'" \
+    "rm '$R/run/systemd/timesyncd.conf.d'; rm -r '$R/usr/share/td'"
+broken "a relative link climbing out of the root" "ln -s ../../../../../../../tmp '$R/etc/climb'" "rm '$R/etc/climb'"
+broken "a relative link out of the root through /var/run" "ln -s /run '$R/var/run'; ln -s ../run/../../etc '$R/var/lib/out'" "rm '$R/var/run' '$R/var/lib/out'"
+broken "/var/log as a link inside the root" "mv '$R/var/log' '$R/var/log.real'; ln -s log.real '$R/var/log'" "rm '$R/var/log'; mv '$R/var/log.real' '$R/var/log'"
 broken "ubuntu without passwordless sudo" "mv '$R/etc/sudoers.d/90-ubuntu' '$T/90-ubuntu'" "mv '$T/90-ubuntu' '$R/etc/sudoers.d/90-ubuntu'"
 broken "a second env" "mkdir '$R/opt/thinksmart/envs/extra'" "rmdir '$R/opt/thinksmart/envs/extra'"
 if check >/dev/null 2>&1; then ok "every break was put back"; else no "every break was put back"; fi
@@ -317,6 +358,39 @@ sh "$IMG/tests/make-fake-root.sh" "$R"
 echo keep > "$T/out/hostname"; rm "$R/etc/hostname"; ln -s "$T/out/hostname" "$R/etc/hostname"
 SANITIZE_GUARD=$T/out nt "sanitize refuses a file link into the build's directories" sh "$IMG/sanitize-rootfs.sh" "$R" "$T/template.yaml" "$REPO"
 t "nothing written through the link" grep -qx keep "$T/out/hostname"
+
+# AccountsService's icons as a link out of the root: sanitize stops before it changes anything
+R=$T/root9
+sh "$IMG/tests/make-fake-root.sh" "$R"
+mv "$R/var/lib/AccountsService/icons" "$T/icons9"; ln -s "$T/icons9" "$R/var/lib/AccountsService/icons"
+nt "sanitize refuses linked AccountsService icons" sh "$IMG/sanitize-rootfs.sh" "$R" "$T/template.yaml" "$REPO"
+t "nothing deleted through the icons link" test -f "$T/icons9/ubuntu"
+
+# /etc/hosts as a link out of the root (not into the build's own directories): sanitize stops and
+# writes nothing through it
+R=$T/root10
+sh "$IMG/tests/make-fake-root.sh" "$R"
+printf '192.168.1.20\tnas.home\n' > "$T/lan-hosts"; rm "$R/etc/hosts"; ln -s "$T/lan-hosts" "$R/etc/hosts"
+nt "sanitize refuses a linked /etc/hosts" sh "$IMG/sanitize-rootfs.sh" "$R" "$T/template.yaml" "$REPO"
+t "nothing written through the hosts link" grep -qx '192.168.1.20	nas.home' "$T/lan-hosts"
+
+# AccountsService's icons behind uv's minor-version link, a directory only the image has: sanitize stops
+R=$T/root12
+sh "$IMG/tests/make-fake-root.sh" "$R"
+UVP=$R/home/ubuntu/.local/share/uv/python
+mv "$R/var/lib/AccountsService/icons" "$UVP/cpython-3.12.11-linux-aarch64-gnu/icons"
+ln -s /home/ubuntu/.local/share/uv/python/cpython-3.12-linux-aarch64-gnu/icons "$R/var/lib/AccountsService/icons"
+nt "sanitize refuses icons behind uv's link" sh "$IMG/sanitize-rootfs.sh" "$R" "$T/template.yaml" "$REPO"
+t "nothing deleted behind uv's link" test -f "$UVP/cpython-3.12.11-linux-aarch64-gnu/icons/ubuntu"
+
+# sanitize's scratch files, held by the capture as links out of the root: nothing written through them
+R=$T/root11
+sh "$IMG/tests/make-fake-root.sh" "$R"
+echo keep > "$T/scratch-passwd"; ln -s "$T/scratch-passwd" "$R/etc/passwd.sanitize"
+echo keep > "$T/scratch-as"; ln -s "$T/scratch-as" "$R/var/lib/AccountsService/users/ubuntu.sanitize"
+t "sanitize runs over linked scratch files" sh "$IMG/sanitize-rootfs.sh" "$R" "$T/template.yaml" "$REPO"
+# shellcheck disable=SC2016 # the inner sh expands them
+t "nothing written through the scratch-file links" sh -c 'grep -qx keep "$1" && grep -qx keep "$2"' sh "$T/scratch-passwd" "$T/scratch-as"
 
 # the current client without its .venv link: sanitize stops instead of deleting every env
 R=$T/root5
