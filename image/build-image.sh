@@ -1,17 +1,19 @@
 #!/bin/bash
 # Build the release image from a capture made by pull-from-device.sh:
-#   image/build-image.sh WORK_DIR OUT_DIR HUB_REPO [SECRETS_FILE]
+#   image/build-image.sh WORK_DIR OUT_DIR HUB_REPO SECRETS_FILE|--test-image
 # WORK_DIR   has root.tar.zst, boot.tar.zst, versions.txt (hub commit, client version, system layer
 #            version and file-set id)
 # OUT_DIR    gets <name>.img.xz, SHA256SUMS (.img.xz and .img), packages.txt
-# HUB_REPO   a checkout of xiaozhi-hub-server holding the captured commit (for the config template)
-# SECRETS_FILE (optional, keep it outside any repository) one literal string per line that must not
+# HUB_REPO   a checkout of ohimsmart/oh-im-smart-gateway (its origin must be that repository) holding
+#            the captured commit (for the config template)
+# SECRETS_FILE (required; keep it outside any repository) one literal string per line that must not
 #            appear anywhere in the image: Wi-Fi names, API keys, device ids, the owner's e-mail...
+#            --test-image instead skips that check and names the image ...-TEST-DO-NOT-PUBLISH.
 # HUB_MAIN   (environment, default origin/main, fetched first) the hub's published main: the shipped
 #            commit must be on it, or every device's scripts/update.sh (git merge --ff-only) fails.
-#            HUB_MAIN=main checks against the local main before it is pushed (push before releasing).
+#            HUB_MAIN=main checks against the local main before it is pushed: test images only.
 # RELEASE_MANIFEST (environment) the latest.json of the newest online update (a file, or the URL
-#            https://github.com/justhalfbit/xiaozhi-thinksmart-client/releases/latest/download/latest.json).
+#            https://github.com/ohimsmart/oh-im-smart-client/releases/latest/download/latest.json).
 #            The image must carry exactly that client and system layer version, so a freshly flashed
 #            device reports "up to date" instead of holding something no release has (publish the
 #            update first, then build the image). ALLOW_UNRELEASED=1 skips this, for test images.
@@ -22,7 +24,13 @@
 # Runs everything that needs root inside a container (image/Dockerfile); the work tree lives in a
 # Docker volume so ownership, devices and capabilities survive.
 set -euo pipefail
-WORK=$(cd "${1:?work dir}" && pwd); OUT=${2:?out dir}; HUB=$(cd "${3:?hub repo}" && pwd); SECRETS=${4:-}
+# no GIT_* variable (GIT_DIR, GIT_INDEX_FILE...) points git below at another repository or index
+for v in $(compgen -e | grep '^GIT_' || true); do unset "$v"; done
+WORK=$(cd "${1:?work dir}" && pwd); OUT=${2:?out dir}; HUB=$(cd "${3:?hub repo}" && pwd)
+SECRETS=${4:?SECRETS_FILE (one secret per line, outside any repository) or --test-image}
+if [ "$SECRETS" != --test-image ]; then
+    grep -q '[^[:space:]]' "$SECRETS" || { echo "$SECRETS lists no secrets"; exit 1; }
+fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 read -r HUB_COMMIT CLIENT_VERSION SYSTEM_VERSION SYSTEM_TREE < <(paste -sd' ' "$WORK/versions.txt")
@@ -46,26 +54,49 @@ print(f'image carries the released client {client} and system layer {sysv}')
 PY
 fi
 NAME=${IMAGE_NAME:-thinksmart-ubuntu-$(date +%Y%m%d)}
+GATEWAY_URL=https://github.com/ohimsmart/oh-im-smart-gateway.git
+[ "$(git -C "$HUB" remote get-url origin)" = "$GATEWAY_URL" ] || {
+    echo "$HUB: origin is not $GATEWAY_URL (the shipped commit must be on our gateway's main)"; exit 1; }
 HUB_MAIN=${HUB_MAIN:-origin/main}
-[ "$HUB_MAIN" = origin/main ] && git -C "$HUB" fetch -q origin main
+# a commit checked against the local main only may never reach GitHub: devices could not update
+if [ "$HUB_MAIN" != origin/main ] && [ "$SECRETS" != --test-image ] && [ "${ALLOW_UNRELEASED:-}" != 1 ]; then
+    echo "HUB_MAIN=$HUB_MAIN is for test images only (--test-image or ALLOW_UNRELEASED=1)"; exit 1
+fi
+if [ "$HUB_MAIN" = origin/main ]; then
+    git -C "$HUB" fetch -q origin +refs/heads/main:refs/remotes/origin/main
+    # the published main itself, not whatever the fetch left in the clone
+    [ "$(git -C "$HUB" rev-parse refs/remotes/origin/main)" = "$(git -C "$HUB" ls-remote origin refs/heads/main | cut -f1)" ] \
+        || { echo "$HUB: origin/main is not GitHub's main after the fetch"; exit 1; }
+fi
 git -C "$HUB" merge-base --is-ancestor "$HUB_COMMIT" "$HUB_MAIN" || {
     echo "hub commit $HUB_COMMIT is not on $HUB_MAIN: merge it into main (fast-forward) first"; exit 1; }
 git -C "$HUB" show "$HUB_COMMIT:scripts/config.template.yaml" > "$WORK/hub-config.template.yaml"
-[ -n "$SECRETS" ] && cp "$SECRETS" "$WORK/secrets.txt" || : > "$WORK/secrets.txt"
+if [ "$SECRETS" = --test-image ]; then : > "$WORK/secrets.txt"; else cp "$SECRETS" "$WORK/secrets.txt"; fi
+# no owner-secret check, or versions no release carries: not a release
+if [ "$SECRETS" = --test-image ] || [ "${ALLOW_UNRELEASED:-}" = 1 ]; then
+    NAME=$NAME-TEST-DO-NOT-PUBLISH
+elif ! st=$(git -C "$HERE/.." status --porcelain) || ! lv=$(git -C "$HERE/.." ls-files -v) \
+        || [ -n "$st" ] || grep -q '^[a-zS]' <<< "$lv"; then
+    # /repo and /s below are the work tree: a release carries what is committed, nothing else; git
+    # failing refuses too (ls-files -v: lowercase is assume-unchanged, S skip-worktree, edits git
+    # status does not show)
+    echo "$HERE/..: uncommitted changes: commit them first (or build a test image)"; exit 1
+fi
 
 # the DMIC fix must be the codec-dmic build (it only exists on the device and in codec-dmic/out)
 KO_MD5=$(awk '/snd-soc-msm8916-digital.ko/{print $1}' "$HERE/../codec-dmic/expected.md5")
 DTB_MD5=$(awk '/apq8053-lenovo-cd-18781y.dtb/{print $1}' "$HERE/../codec-dmic/expected.md5")
 docker build -q -t thinksmart-image "$HERE" >/dev/null 2>&1
 docker volume create tsimg-work >/dev/null
-docker run --rm -i -v tsimg-work:/w -v "$WORK:/in:ro" -v "$OUT:/out" -v "$HERE:/s:ro" \
+# /repo: this repository, for the keep files sanitize puts in and the system layer check-rootfs compares
+docker run --rm -i -v tsimg-work:/w -v "$WORK:/in:ro" -v "$OUT:/out" -v "$HERE:/s:ro" -v "$HERE/..:/repo:ro" \
     -e NAME="$NAME" -e HUB_COMMIT="$HUB_COMMIT" -e CLIENT_VERSION="$CLIENT_VERSION" -e KO_MD5="$KO_MD5" -e DTB_MD5="$DTB_MD5" \
     thinksmart-image bash -s <<'EOF'
 set -euo pipefail
 BOOT_UUID=35bca636-764e-4f53-b5e5-96eb774eb19e
 ROOT_UUID=8b6cd6d2-cf64-4279-b1cc-426345d5b822
 BOOT_START=2048 BOOT_SECTORS=509952 ROOT_START=512000
-log() { echo "== $*"; }
+log() { echo "== $*  ($(date +%T))"; }
 
 log "unpack"
 rm -rf /w/root /w/boot /w/*.img /w/caps.txt
@@ -79,7 +110,14 @@ log "USB network: NCM instead of RNDIS (macOS has no RNDIS)"
 sh /s/initramfs-usb-ncm.sh /w/boot/initramfs
 
 log "sanitize"
-sh /s/sanitize-rootfs.sh $R /in/hub-config.template.yaml
+# the mother device's name is an owner identifier: it must not survive anywhere (hosts, prompts, logs)
+orig_host=$(cat $R/etc/hostname)
+cp /s/owner-identifiers.txt /w/owner-identifiers.txt; : > /w/host.txt
+case $orig_host in
+    thinksmart|ubuntu|localhost|"") echo "mother hostname '$orig_host' is generic: not searched for" ;;
+    *) echo "$orig_host" >> /w/owner-identifiers.txt; echo "$orig_host" > /w/host.txt ;;
+esac
+sh /s/sanitize-rootfs.sh $R /in/hub-config.template.yaml /repo
 
 log "files the image must carry: DMIC fix, audio rules, ALSA plugin, user unit links"
 # codec-dmic/build.sh output (codec-dmic/expected.md5): the DTB with qcom,dmic-sample-rate and the module
@@ -112,8 +150,7 @@ for p in $held; do
     n=$((n + 1))
 done
 echo "held packages: $n"
-# Chinese time servers, rsyslog off (device-setup.sh files / tidy)
-need $R/etc/systemd/timesyncd.conf.d/thinksmart.conf
+# rsyslog off (device-setup.sh tidy); the NTP= line is checked by check-rootfs.sh
 [ ! -e $R/etc/systemd/system/multi-user.target.wants/rsyslog.service ] || { echo "rsyslog still enabled (device-setup.sh tidy)"; exit 1; }
 # Wi-Fi power save off (device-setup.sh files)
 need $R/etc/NetworkManager/conf.d/zz-thinksmart-wifi-powersave-off.conf
@@ -137,22 +174,28 @@ echo "ok"
 
 log "hub repository: $HUB_COMMIT as main, tracking origin/main"
 # as the owner (uid 1000), so .git stays ubuntu's
-G() { setpriv --reuid=1000 --regid=1000 --clear-groups env HOME=/tmp git -c 'safe.directory=*' -C $R/home/ubuntu/xiaozhi-hub-server "$@"; }
-[ "$(G rev-parse HEAD)" = "$HUB_COMMIT" ] || { echo "hub HEAD is not $HUB_COMMIT"; exit 1; }
-# rewritten below; a power cut right after the admin page's update check leaves them zero-filled
-rm -f $R/home/ubuntu/xiaozhi-hub-server/.git/FETCH_HEAD $R/home/ubuntu/xiaozhi-hub-server/.git/refs/remotes/origin/main
-G checkout -q -B main "$HUB_COMMIT"
-G for-each-ref --format='%(refname)' refs/heads refs/remotes refs/stash | { grep -v -x -e refs/heads/main -e refs/remotes/origin/main -e refs/remotes/origin/HEAD || true; } \
-    | while read -r ref; do G update-ref -d "$ref"; done || true
-G remote | { grep -v -x origin || true; } | while read -r r; do G remote remove "$r"; done
-G remote set-url origin https://github.com/justhalfbit/xiaozhi-hub-server.git
-# The commit is on the published main (checked on the host), so origin/main may point at it
-G update-ref refs/remotes/origin/main "$HUB_COMMIT"
-G branch -q -u origin/main main
-G config --unset-all http.proxy 2>/dev/null || true
-G reflog expire --expire=now --all
-G gc -q --prune=now
-[ -z "$(G status --porcelain)" ] || { echo "hub working tree is not clean:"; G status --short | head; exit 1; }
+setpriv --reuid=1000 --regid=1000 --clear-groups env HOME=/tmp \
+    sh /s/clean-hub-git.sh $R/home/ubuntu/xiaozhi-hub-server "$HUB_COMMIT"
+
+log "file tree: sources, system layer, upstream URLs, owner identifiers, accounts, home"
+sh /s/check-rootfs.sh $R /w/owner-identifiers.txt /repo
+
+log "privacy check over the file tree"
+# the owner's secrets (none for a test image) and the mother device's name, which nothing may
+# carry; the maintainer's identifiers are check-rootfs.sh's, which allows an attribution in a
+# LICENSE (a newline between: the owner's file may lack its last one; blank lines are skipped)
+{ cat /in/secrets.txt; echo; cat /w/host.txt; } > /w/secrets.txt
+# a test image of a generically named device has nothing to look for
+if grep -q '[^[:space:]]' /w/secrets.txt; then PRIV=/w/secrets.txt; else PRIV=--test-image; fi
+sh /s/check-image-privacy.sh $R $PRIV
+log "privacy check over the boot files and the unpacked initramfs"
+sh /s/check-image-privacy.sh /w/boot $PRIV
+# the initramfs is gzip (the NCM member too): the scan of the raw image cannot see inside it
+for f in /w/boot/initramfs*; do
+    gzip -dc "$f" > /w/initramfs.raw
+    sh /s/check-image-privacy.sh /w/initramfs.raw $PRIV
+done
+rm -f /w/initramfs.raw
 
 log "capabilities to check after mke2fs"
 getcap -r $R/usr 2>/dev/null | sed "s|^$R||" > /w/caps.txt || true
@@ -199,30 +242,9 @@ echo "capabilities kept: $(wc -l < /w/caps.txt)"
 [ "$(stat -c %s /w/disk.img)" = $(( (ROOT_START + root_sectors) * 512 )) ] || { echo "mke2fs changed the image size"; exit 1; }
 
 log "privacy check over the whole image"
-fail=0
-check() {  # label, then grep arguments
-    local label=$1; shift
-    n=$(grep -a -c "$@" /w/disk.img || true)
-    printf '%-28s %s\n' "$label" "$n"; [ "$n" = 0 ] || fail=1
-}
-check "ssh-ed25519 public keys" -F -e "ssh-ed25519 AAAA"
-check "ssh-rsa public keys"     -F -e "ssh-rsa AAAA"
-# Real keys are long runs of letters and digits; "sk-"/"xai-" alone match ordinary words (disk-, ssh-sk-helper)
-check "sk- API keys"            -E -e "sk-[A-Za-z0-9]{32,}"
-check "xai- API keys"           -E -e "xai-[A-Za-z0-9]{32,}"
-check "owner e-mail"            -F -e "qiuhe.zhang"
-# a host on the owner's LAN (requests' docstring has the network 192.168.100.0/24, which is fine)
-check "LAN host 192.168.100.x"  -E -e "192\.168\.100\.[1-9][0-9]{0,2}([^0-9/]|$)"
-check "Mac proxy 127.0.0.1:7897" -F -e "127.0.0.1:7897"
-n=0
-while IFS= read -r s; do
-    [ -n "$s" ] || continue
-    c=$(grep -a -c -F -e "$s" /w/disk.img || true)
-    [ "$c" = 0 ] || { echo "secret #$((n+1)) found $c times"; fail=1; }
-    n=$((n+1))
-done < /in/secrets.txt
-echo "owner secrets checked: $n"
-[ $fail = 0 ] || { echo "privacy check FAILED"; exit 1; }
+# the upstream author's e-mail, LAN and proxy checks are gone (spec §5.3 point 5): ours are listed
+# in SECRETS_FILE, and the maintainer's handle in owner-identifiers.txt (check-rootfs.sh)
+sh /s/check-image-privacy.sh /w/disk.img $PRIV
 
 log "package list"
 awk '/^Package:/{p=$2} /^Version:/{v=$2} /^Status:/{s=$0} /^$/{if (s ~ / installed$/) print p, v; s=""}' \

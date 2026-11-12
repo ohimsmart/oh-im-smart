@@ -370,7 +370,7 @@ def test_make_release_carries_the_system_layer(tmp_path):
         names = t.getnames()
         assert 'image/system-files.txt' in names and 'kiosk/thinksmart-kiosk.py' in names
     text = (out / f'release-{tag}.txt').read_text()
-    assert '不需要手动下载' in text and 'thinksmart-ubuntu-image' in text
+    assert '不需要手动下载' in text and 'ohimsmart/oh-im-smart/releases' in text
     # the same files again: fine; a changed file with the same VERSION: refused
     assert subprocess.run(mk, capture_output=True).returncode == 0
     (img / 'kiosk' / 'welcome.html').write_text('changed')

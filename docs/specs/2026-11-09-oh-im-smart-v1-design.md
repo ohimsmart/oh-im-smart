@@ -110,7 +110,7 @@ UM 的前置準備：
 
    **私人資料的掃描：** 對整個 `disk.img` 的原始位元組 grep 繼續保留，並作以下改動：
    - 原有的兩項 SSH 檢查（`ssh-ed25519 AAAA`、`ssh-rsa AAAA`）只能找到公鑰，改名為公鑰檢查。另加私鑰檢查，只認真正的 PEM 區塊：標頭 `-----BEGIN [A-Z ]*PRIVATE KEY-----`（涵蓋 OpenSSH、RSA、EC、PKCS#8，包括 `ENCRYPTED PRIVATE KEY`）後面接換行，可以有加密 PEM 的 `Proc-Type:`、`DEK-Info:` 這類標頭行和一個空行，然後是 40 字元以上的 base64，即 `grep -aPzc -e "-----BEGIN [A-Z ]*PRIVATE KEY-----\r?\n(?:[A-Za-z-]+:[^\n]*\r?\n)*(?:\r?\n)?[A-Za-z0-9+/=]{40,}" disk.img`。標頭前面不設行首錨點，因為原始映像裏檔案邊界不是換行，金鑰前面可能是 0 位元組；`-z` 以 NUL 分段，所以跨換行比對可行。只比對標頭字串會誤判 `cryptography` 的 `serialization/ssh.py` 這類把標頭寫成引號常數的程式庫原始碼（網關經 `pyjwt[crypto]` 依賴它）。以四個合成測試確認：放入一把不在 `SECRETS_FILE` 裏的私鑰，打包必須失敗；同一把金鑰前面加上一串 0 位元組，打包仍然必須失敗；放入一把以密碼加密的傳統 RSA PEM（含 `Proc-Type`、`DEK-Info`），打包必須失敗；放入一行 `_SK_START = b"-----BEGIN OPENSSH PRIVATE KEY-----"`，打包必須通過；
-   - API key 的樣式放寬為 `sk-[A-Za-z0-9_-]{32,}`，涵蓋 `sk-ant-…` 這類含連字號的 key；
+   - API key 的樣式放寬為 `(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{32,}`（`grep -P`），涵蓋 `sk-ant-…` 這類含連字號的 key；前面的 lookbehind 要求 `sk-` 前面不是 key 的字元，因為 base64url 雜湊（例如 wheel 的 `RECORD` 檔）裏也會出現 `sk-`；
    - `SECRETS_FILE` 改為**必填**，而且至少要有一行非空內容，否則打包失敗。只有測試用映像可以用明確的 `--test-image` 參數略過，這種映像不得發佈。
    - 原有寫死的上游作者識別字串（電郵、內網網段、代理位址）屬於上游作者，對我們沒有作用，移除。改為一份已 commit、不含秘密的維護者識別清單 `image/owner-identifiers.txt`（例如母機原本的主機名稱、維護者的電郵）。這份清單**以檔案樹方式**掃描 `$R`，用跟上游網址相同的「路徑＋整行」允許清單機制，所以 LICENSE、NOTICE、README 裏的出處說明可以逐行豁免，不會令打包失敗。
 6. **母機的準備：** 在母機安裝第一個 Oh I'm Smart 版本之前：
@@ -118,7 +118,7 @@ UM 的前置準備：
    2. 網關 clone：把 origin 改為我們的 repo，`git fetch origin`。#9 必須以 merge commit（不是 squash）併入 `oh-im-smart-gateway` 的 `main`，所以母機現有的 `HEAD` 是新 `main` 的祖先。執行 `git merge-base --is-ancestor HEAD origin/main` 確認；成立的話 `git checkout main`（必要時從 `origin/main` 建立）、`git branch -u origin/main`，再執行 `scripts/update.sh`。不成立的話，在旁邊重新 clone 那個 commit，把 `data/` 搬過去再換上。
    3. 確認網關的 `HEAD` 等於本次要發佈的 `main` commit，不相等就停止。
    4. 母機的客戶端是自行安裝的版本，從客戶端頁面更新時會要求確認「取代自訂版本」（`replace_custom`）；§5.6 第 3 步照此確認。
-7. **sanitize 需要的 repo 檔案：** 打包容器原本只掛載 `image/`。要覆寫的設定檔（`update/thinksmart-update.conf`、`kiosk/thinksmart-kiosk.conf`）由 `build-image.sh` 先複製進容器可讀取的位置，再交給 `sanitize-rootfs.sh`。
+7. **sanitize 需要的 repo 檔案：** 打包容器原本只掛載 `image/`。`build-image.sh` 改為把整個 repo 唯讀掛載在容器的 `/repo`：sanitize 從那裏取要覆寫的設定檔（`update/thinksmart-update.conf`、`kiosk/thinksmart-kiosk.conf`），check-rootfs 從那裏逐檔比對系統層。
 
 ### 5.4 母機的私人資料
 
@@ -132,7 +132,9 @@ UM 的前置準備：
   - 刪除 `/etc/shadow-`、`/etc/passwd-`、`/etc/group-`、`/etc/gshadow-`、`/etc/subuid-`、`/etc/subgid-`。這些是系統自動建立的備份，會含有舊的密碼雜湊或帳號名稱；
   - 清空 `$R/root`，只保留 `.bashrc` 和 `.profile`。原本只刪除固定清單裏的檔案，`/root/.config`、`/root/.aws`、`/root/.docker` 之類會漏掉；
   - `ubuntu` 家目錄裏原本整批保留的目錄改為只留指定項目：`~/.config/systemd/user` 只保留 `system-files.txt` 和 `device-setup.sh` 安裝的服務檔和連結，加上網關 `scripts/autostart.sh enable` 安裝的 `xiaozhi-hub.service` 和 `default.target.wants/xiaozhi-hub.service`（少了它們，刷機後網關不會開機自啟）；`~/.config/pipewire`、`~/.config/wireplumber` 只保留這兩處安裝的音效設定檔（例如 `main.lua.d/99-cd18781y-alsa.lua`）；`~/.local` 只保留 `share/uv`（網關 `.venv` 用的 Python）和 `bin/uv`、`bin/uvx`（網關更新依賴時 `scripts/install.sh` 要用 `uv`，缺了會改從 astral.sh 重新下載），其餘全部刪除；
-  - `$R/etc/hostname` 改為固定的公開名稱 `thinksmart`，`/etc/hosts` 裏對應的一行同步修改；
+  - `$R/etc/hostname` 改為固定的公開名稱 `thinksmart`；`/etc/hosts` 整個換成 Ubuntu 原本的內容（只有 `localhost`、`thinksmart` 和 IPv6 的固定幾行），母機主人加上的區網名稱不留下；刪除 `/etc/machine-info`；
+  - `ubuntu` 帳號的名稱欄（GECOS）改為 `Ubuntu`；刪除 AccountsService 裏 `ubuntu` 的頭像；`users/ubuntu` 只留下 `[User]` 和 `Session=`、`XSession=`、`SystemAccount=`、`Language=` 這幾種完整符合格式的行（`Icon=`、`Email=` 等是母機主人的）；
+  - 容器裏的絕對連結指向容器本身，不是映像：擷取結果裏有指向根目錄以外的目錄連結（Ubuntu 原有的 `/var/run`、`/var/lock`，和 uv 在 `~/.local/share/uv/python` 裏從 Python 小版本指向安裝版本的連結除外：沒有東西透過它們刪改；網關 `.venv/bin/python` 經過它們，check-rootfs 檢查它時把路徑上每一段連結都在映像裏解析）、往上爬出根目錄（或經過絕對連結離開根目錄）而指向目錄的相對連結，或 sanitize 要寫的檔案（`passwd` 等帳號檔、`hostname`、`hosts`、`timezone`、`machine-id`、shell 啟動檔、`users/ubuntu`、更新程式的 `status.json`）和它開始 `find` 的目錄（`/etc`、`/home`、`/var/log` 等）是連結，sanitize 就停下、甚麼都不改；
   - shell 啟動檔常被用來 export token，所以不保留母機的版本：`root` 的 `.bashrc`、`.profile` 和 `ubuntu` 的 `.bashrc`、`.profile`、`.bash_logout`，都用 `$R/etc/skel` 的同名檔覆寫，擁有者和權限照原樣設定；
   - 時區重設為 `Etc/UTC`：改寫 `$R/etc/timezone`，並把 `$R/etc/localtime` 連結到對應檔案；
   - 刪除 kiosk 的語言狀態檔（§6.2）。
@@ -140,7 +142,9 @@ UM 的前置準備：
   - `$R/etc/shadow` 的 `ubuntu` 雜湊必須跟常數完全相同，`root` 必須是鎖定狀態；
   - `$R/root` 裏只能有上述兩個檔案；上述 shell 啟動檔跟 `$R/etc/skel` 的同名檔逐位元組相同；
   - 上述家目錄裏只留指定項目的目錄，內容必須跟預期的路徑清單完全相同；以一個合成的根檔案系統測試：多一個含假 token 的用戶服務檔，打包必須刪除它，而 `xiaozhi-hub.service` 和它的 `default.target.wants` 連結必須保留；
-  - `$R/etc/hostname` 是 `thinksmart`；
+  - `$R/etc/hostname` 是 `thinksmart`；`/etc/hosts` 跟 Ubuntu 原本的內容逐位元組相同；`/etc/machine-info` 不存在；`machine-id` 是空的一般檔案；
+  - `ubuntu` 的名稱欄是 `Ubuntu`，沒有頭像，`users/ubuntu` 只有上述幾種行；
+  - 沒有上述的連結；
   - 被移除的帳號名稱不再出現在 `passwd`、`shadow`、`group`、`gshadow`、`subuid`、`subgid` 裏。以一個合成的根檔案系統測試：多一個帳號，帶群組成員資格、crontab 和 `sudoers.d` 檔；
   - kiosk 的語言狀態檔不存在；
   - 任何一項不符合，打包就失敗；
@@ -151,7 +155,7 @@ UM 的前置準備：
 
 不併入上游 image repo 的自動時區 PR（[#9](https://github.com/justhalfbit/thinksmart-ubuntu-image/pull/9)）。它每次聯網都會以明文 HTTP 呼叫 ip-api.com，等於把每部裝置的公網 IP 交給第三方，而且回應未經驗證就以 root 身份套用。v1 的做法：
 
-- NTP 改為 `NTP=ntp.aliyun.com ntp.tencent.com cn.pool.ntp.org pool.ntp.org ntp.ubuntu.com`，全部寫在 `NTP=` 裏，依序嘗試。只要設定了 `NTP=`，timesyncd 就會忽略 `FallbackNTP=`，所以不能把國內伺服器放在那裏。裝置沒有 RTC 電池，對時之前 TLS 會失敗，所以必須盡快對時。上游已實測 `ntp.ubuntu.com` 在國內要約 20 秒，因此維持上游「國內可達的伺服器在前」的次序；`ntp.aliyun.com` 在國外也能回應，其他地區只是多試一兩個伺服器。改動只是在後面加上 `pool.ntp.org`。來源檔 `kiosk/timesyncd-cn.conf` 改名為 `timesyncd.conf`，同時更新 `system-files.txt`。安裝路徑不變；`build-image.sh` 原本只檢查檔案存在，改為檢查完整的 `NTP=` 一行。
+- NTP 改為 `NTP=ntp.aliyun.com ntp.tencent.com cn.pool.ntp.org pool.ntp.org ntp.ubuntu.com`，全部寫在 `NTP=` 裏，依序嘗試。只要設定了 `NTP=`，timesyncd 就會忽略 `FallbackNTP=`，所以不能把國內伺服器放在那裏。裝置沒有 RTC 電池，對時之前 TLS 會失敗，所以必須盡快對時。上游已實測 `ntp.ubuntu.com` 在國內要約 20 秒，因此維持上游「國內可達的伺服器在前」的次序；`ntp.aliyun.com` 在國外也能回應，其他地區只是多試一兩個伺服器。改動只是在後面加上 `pool.ntp.org`。來源檔 `kiosk/timesyncd-cn.conf` 改名為 `timesyncd.conf`，同時更新 `system-files.txt`。安裝路徑不變；`build-image.sh` 原本只檢查檔案存在，改為檢查完整的 `NTP=` 一行。`NTP=` 是累加的（`timesyncd.conf(5)`），所以檔案在那一行之前先放一行空的 `NTP=`，清掉主設定檔 `/etc/systemd/timesyncd.conf` 可能設的伺服器；打包檢查另外要求四個 `systemd/timesyncd.conf.d` 目錄（`/etc`、`/run`、`/usr/local/lib`、`/usr/lib` 下）裏只有這一個 drop-in，而且它們都不是連結。
 - `image/device-setup.sh` 不再寫死 `Asia/Shanghai`。映像預設 `Etc/UTC`（見 §5.4）。
 - 教學的首次設定加入一步：`sudo timedatectl set-timezone <你的時區>`，並附上三種語言的常見例子，例如 `Asia/Hong_Kong`、`Asia/Shanghai`、`America/Los_Angeles`。
 - 由網關後台用電腦瀏覽器的時區一鍵設定，留待 v1 之後再做。
