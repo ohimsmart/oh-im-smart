@@ -18,6 +18,8 @@
 
 设备上的目录：`/opt/thinksmart/client/<版本>/`（root 所有）、`current`/`previous` 链接、`/opt/thinksmart/envs/<依赖哈希>/`；状态 `/var/lib/thinksmart-update/status.json`（所有人可读，客户端和欢迎页读它显示）。
 
+任务状态 `job` 有中文的 `message`（旧页面显示）、`msg_key`/`msg_params`（页面按语言翻译；所有键列在 `msg_keys.json`，由 `test_msg_keys.py` 核对）和 `reboot`（这次更新要重启设备才完全生效）；`check_error` 旁边有同样格式的 `check_error_msg`。改了更新器的文字：重新产生 `msg_keys.json`，复制到客户端仓库的 `tests/updater_keys.json`，再补客户端的繁中和英文字典（两个仓库的测试互相看不到，这一步要手动做）。
+
 ## 系统层
 
 系统层 = 本仓库装到设备上的文件（展示屏外壳、欢迎页、键盘、熄屏和接近传感器、麦克风服务、音频和蓝牙配置、更新服务自己）。

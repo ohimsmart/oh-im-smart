@@ -526,6 +526,10 @@ async function forget() {
 /* ---- updates (client and system layer): the root updater installs, this page only shows and asks (via thinksmart-kiosk.py) ---- */
 const UPD_STAGE = { preparing: '正在准备', downloading: '正在下载', installing: '正在安装',
                     testing: '正在重启并自检', rolling_back: '自检没通过，正在退回' };
+// job.reboot from the updater; an older updater only says it in its Chinese message
+const needsReboot = job => (typeof job.reboot === 'boolean' ? job.reboot : /重启设备后生效/.test(job.message || ''));
+// a failed or rolled-back result; the system layer before it may still need a restart (spec §6.1)
+const updFail = job => (job.message || '') + (job.state !== 'done' && needsReboot(job) ? '。系统层的部分改动重启设备后生效' : '');
 let upd = null, updArmed = 0;
 let updStarting = 0;   // request sent, the updater hasn't reported yet (it takes a few seconds to start)
 function updParts(u) {
@@ -556,7 +560,7 @@ function renderUpdate() {
   } else if (parts.length) {
     title = '有新版本 ' + parts.map(p => `${p.name} ${p.version}`).join(' · ');
     bad = !!result && job.state !== 'done';
-    text = bad ? job.message : (u.current ? `当前：客户端 ${u.current}` + (sys.current ? ` · 系统层 ${sys.current}` : '') : '小智客户端');
+    text = bad ? updFail(job) : (u.current ? `当前：客户端 ${u.current}` + (sys.current ? ` · 系统层 ${sys.current}` : '') : '小智客户端');
     if (Date.now() - updArmed < 5000) {
       // waiting for the confirming tap: keep the hint (the status poll re-renders every 3 s)
       bad = false;
@@ -568,8 +572,8 @@ function renderUpdate() {
     // and an older updater keeps only the last one's message
     text = job.state === 'done' && u.current && sys.current
       ? `现在是 系统层 ${sys.current} · 客户端 ${u.current}`
-        + (/重启设备后生效/.test(job.message || '') ? '，部分改动重启设备后生效' : '')
-      : job.message || '';
+        + (needsReboot(job) ? '，部分改动重启设备后生效' : '')
+      : updFail(job);
     bad = job.state !== 'done';
   }
   $('updTitle').textContent = title || '';
