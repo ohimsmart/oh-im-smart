@@ -5,7 +5,7 @@
  * thinksmart-kiosk.py injects this file into every page. Whenever a text field (<input> of a
  * text-like type, <textarea>) gets focus the keyboard slides up from the bottom of the screen and
  * types into it, like a phone's: pages only use plain fields. What a page can tune on the field:
- *   enterkeyhint="go|done|next|send|search"  label of the enter key (default 完成)
+ *   enterkeyhint="go|done|next|send|search"  label of the enter key (default: Done, in the page's <html lang>)
  *   data-kb-enter="连接"                      or any label
  *   inputmode="none" / data-kb="off"          no keyboard for this field
  * Enter on an <input> sends a real-looking keydown/keyup "Enter" (and submits its <form>), then
@@ -48,7 +48,19 @@
       ['{abc}', '{space}', '{enter}'],
     ],
   };
-  const LABEL = { '{shift}': '⇧', '{bksp}': '⌫', '{123}': '123', '{sym}': '#+=', '{abc}': 'ABC', '{space}': '空格' };
+  const LABEL = { '{shift}': '⇧', '{bksp}': '⌫', '{123}': '123', '{sym}': '#+=', '{abc}': 'ABC' };
+  // Key words in the page's language, read from <html lang> each time the keyboard comes up (spec §6.2):
+  // zh-Hant/TW/HK/MO Traditional; other zh, or no lang at all (a user's own page), Simplified; else English
+  const WORDS = {
+    'zh-Hans': { space: '空格', keys: { go: '前往', done: '完成', next: '下一项', send: '发送', search: '搜索', enter: '换行' } },
+    'zh-Hant': { space: '空格', keys: { go: '前往', done: '完成', next: '下一項', send: '傳送', search: '搜尋', enter: '換行' } },
+    en: { space: 'space', keys: { go: 'Go', done: 'Done', next: 'Next', send: 'Send', search: 'Search', enter: 'Return' } },
+  };
+  function words() {
+    const lang = document.documentElement.lang || '';
+    if (lang && !/^zh(?:-|$)/i.test(lang)) return WORDS.en;
+    return /^zh-(?:Hant|TW|HK|MO)(?:-|$)/i.test(lang) ? WORDS['zh-Hant'] : WORDS['zh-Hans'];
+  }
 
   const CSS = `
   .tskb { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 22px;
@@ -99,7 +111,8 @@
           else if (k === '{enter}') { b.classList.add('enter'); b.disabled = !enterEnabled; }
           else if (k.startsWith('{')) b.classList.add('fn');
           if (k === '{shift}' && shift) b.classList.add(shift === 2 ? 'lock' : 'on');
-          b.textContent = k === '{enter}' ? (opts.enterLabel || '完成')
+          b.textContent = k === '{enter}' ? (opts.enterLabel || words().keys.done)
+            : k === '{space}' ? words().space
             : LABEL[k] || (shift && k.length === 1 ? k.toUpperCase() : k);
           // pointerdown, not click: no 300 ms delay and the field keeps its look
           b.addEventListener('pointerdown', e => { e.preventDefault(); press(k); });
@@ -140,7 +153,6 @@
 
   /* ---- system keyboard: follows the focused text field ---- */
   const TEXT_TYPES = ['text', 'password', 'search', 'url', 'email', 'tel', 'number', ''];
-  const ENTER_LABELS = { go: '前往', done: '完成', next: '下一项', send: '发送', search: '搜索', enter: '换行' };
   let dock = null, kb = null, field = null, hideTimer = 0;
 
   function editable(el) {
@@ -197,8 +209,9 @@
   }
 
   function enterLabel(el) {
-    return (el.dataset && el.dataset.kbEnter) || ENTER_LABELS[el.getAttribute('enterkeyhint')] ||
-      (el.tagName === 'TEXTAREA' ? '换行' : '完成');
+    const keys = words().keys;
+    return (el.dataset && el.dataset.kbEnter) || keys[el.getAttribute('enterkeyhint')] ||
+      (el.tagName === 'TEXTAREA' ? keys.enter : keys.done);
   }
 
   function announce(open) {
@@ -219,8 +232,8 @@
       document.body.appendChild(dock);
       kb = create(dock, { onKey: insert, onBackspace: backspace, onEnter: enter });
     }
-    const label = enterLabel(el);
-    if (field !== el || kb.label !== label) { kb.reset(); kb.setEnterLabel(label); }
+    const label = enterLabel(el), w = words();
+    if (field !== el || kb.label !== label || kb.words !== w) { kb.words = w; kb.reset(); kb.setEnterLabel(label); }
     field = el;
     const wasOpen = dock.classList.contains('open');
     dock.classList.add('open');
@@ -252,5 +265,5 @@
   // a field that disappears (its sheet closed) takes the keyboard with it
   setInterval(() => { if (field && (!field.isConnected || !field.offsetParent)) { const f = field; hide(); f.blur(); } }, 500);
 
-  window.ThinkSmartKeyboard = { create, hide, auto: true };
+  window.ThinkSmartKeyboard = { create, hide, auto: true, words };
 })();

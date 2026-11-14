@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-Hans">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,6 +14,8 @@
   An update found by thinksmart-update (client and/or system layer; status polled through the same
   handler) is shown under the status line with an 更新 button; the install runs as root in the updater.
   Everything is local: no network needed to render this page.
+  The screen's language comes from the kiosk too (lang, spec §6.2): without one the page asks for it
+  first; text is translated by i18n.js with zh-Hant.js / en.js.
 -->
 <style>
   :root {
@@ -28,6 +30,8 @@
          linear-gradient(160deg, var(--bg1), var(--bg0));
          color: var(--ink); font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", sans-serif;
          -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+  /* English: a Latin font first; the CJK one draws ’ “ ” full width */
+  html:lang(en) body { font-family: "Noto Sans", "Noto Sans CJK SC", sans-serif; }
   button { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .app { height: 100%; display: grid; grid-template-rows: auto 1fr auto; padding: 28px 44px 22px; }
 
@@ -132,7 +136,7 @@
   .field { display: flex; align-items: center; gap: 12px; height: 68px; padding: 0 20px; border-radius: 16px;
            background: #ffffff0d; border: 2px solid transparent; font-size: 24px; }
   .field:focus-within { border-color: var(--accent); background: #6c8cff14; }
-  .field .label { width: 92px; flex: none; font-size: 17px; color: var(--ink3); }
+  .field .label { min-width: 92px; flex: none; white-space: nowrap; font-size: 17px; color: var(--ink3); }
   .field input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink);
                  font: inherit; letter-spacing: .5px; caret-color: var(--accent2);
                  user-select: text; -webkit-user-select: text; }
@@ -149,6 +153,20 @@
   .link { height: 56px; padding: 0 18px; border-radius: 12px; border: 1px solid #ff6b8155; background: #ff6b8110;
           color: var(--bad); font-size: 16px; }
   .net .meta.saved { color: var(--ink3); }
+
+  /* ---- language: asked on the first start, reopened from the footer ---- */
+  .langs { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; text-align: center;
+           background: radial-gradient(900px 600px at 50% 0%, #17224a 0%, transparent 60%), linear-gradient(160deg, #0d1430, #070b16); }
+  .langs.on { display: grid; animation: fade .18s ease-out; }
+  .langs h3 { margin: 0 0 36px; font-size: 26px; font-weight: 600; color: var(--ink2); }
+  .langs-row { display: flex; gap: 20px; justify-content: center; }
+  .langs-row button { height: 96px; min-width: 260px; padding: 0 28px; border-radius: 22px; border: 1px solid var(--line);
+                      background: var(--card); font-size: 30px; font-weight: 600; }
+  .langs-row button:active { transform: scale(.97); }
+  .langs-row button[disabled] { opacity: .4; }
+  .langs .msg { justify-content: center; margin-top: 24px; }
+  .langs-close { position: absolute; top: 26px; right: 44px; }
+  .langs-close[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -201,7 +219,7 @@
       <div class="card">
         <h2>使用你自己的服务</h2>
         <p>展示屏会全屏打开任意网页。用电脑 SSH 登录本机后，设置要打开的地址：</p>
-        <code id="ssh">ssh ubuntu@&lt;设备 IP&gt;<br>sudo kiosk-mode url http://你的地址</code>
+        <code id="ssh"></code>
       </div>
     </section>
   </main>
@@ -210,6 +228,7 @@
     <span>设备地址 <b id="ip">—</b></span>
     <span>主机名 <b id="host">—</b></span>
     <span>Wi‑Fi <b id="ssid">—</b><button class="chip" id="chipWifi">切换</button></span>
+    <span><button class="chip" id="chipLang" data-no-i18n></button></span>
     <span class="grow">配置的页面恢复后会自动切换过去</span>
   </footer>
 </div>
@@ -251,18 +270,42 @@
   </section>
 </div>
 
+<!-- language: asked until one is chosen (the kiosk waits for it, spec §6.2); the names are never translated.
+     Once a language is saved the picker can be closed again without a new choice. -->
+<div class="langs" id="langs">
+  <button class="icon-btn langs-close" id="langClose" aria-label="关闭" hidden>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#cfe0ff" stroke-width="2.2" stroke-linecap="round">
+      <path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div data-no-i18n>
+    <h3>選擇語言 · 选择语言 · Choose a language</h3>
+    <div class="langs-row">
+      <button data-lang="zh-Hant">繁體中文</button>
+      <button data-lang="zh-Hans">简体中文</button>
+      <button data-lang="en">English</button>
+    </div>
+    <div class="msg bad" id="langMsg"></div>
+  </div>
+</div>
+
 <script src="qrcode.js"></script>
+<script src="zh-Hant.js"></script>
+<script src="en.js"></script>
+<script src="i18n.js"></script>
 <!-- the kiosk injects the system keyboard into every page; this copy is for previewing in a desktop browser -->
 <script src="keyboard.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const WEEK = '日一二三四五六';
+const t = KioskI18n.t;
+// the language the kiosk put in the address, before anything below writes to the page (spec §6.2)
+KioskI18n.apply(new URLSearchParams(location.search).get('lang'));
 
+const dateFormats = {};
 function tick() {
-  const now = new Date();
+  const now = new Date(), locale = KioskI18n.locale;
   $('time').textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  $('date').textContent = `${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}`;
+  dateFormats[locale] = dateFormats[locale] || new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' });
+  $('date').textContent = dateFormats[locale].format(now);
 }
 
 let shownHelp = null;
@@ -280,28 +323,72 @@ function drawQr(url) {
       if (qr.isDark(y, x)) g.fillRect(Math.floor(x * s), Math.floor(y * s), Math.ceil(s), Math.ceil(s));
 }
 
-// Called by thinksmart-kiosk.py (and once from the query string): fills in what the device knows
+/* ---- language (spec §6.2): the kiosk keeps the choice in its own file and passes it in the status ---- */
+let lastStatus = {};
+// Called by thinksmart-kiosk.py (and once from the query string): what the device knows, and its language
+// (read when the status is sent, so one taken before a choice was saved can't bring the old one back)
 window.thinksmartStatus = function (st) {
+  lastStatus = st;
+  // no language yet: the kiosk stays here until one is chosen
+  if (!st.lang && !$('langs').classList.contains('on')) openLanguages();
+  if (st.lang && st.lang !== KioskI18n.locale) setLanguage(st.lang);
+  else renderStatus();
+};
+function setLanguage(lang) {
+  KioskI18n.apply(lang);
+  tick();
+  renderStatus();
+  renderUpdate();
+}
+// keep the kiosk from switching pages while the Wi-Fi sheet or the language picker is open
+function holdPage() {
+  call('busy', { value: $('sheet').classList.contains('open') || $('langs').classList.contains('on') });
+}
+function openLanguages() {
+  $('langMsg').textContent = '';
+  $('langClose').hidden = !lastStatus.lang;   // the first choice can't be skipped
+  $('langs').classList.add('on');
+  holdPage();
+}
+function closeLanguages() {
+  $('langs').classList.remove('on');
+  holdPage();
+}
+async function chooseLanguage(lang) {
+  const buttons = document.querySelectorAll('[data-lang]');
+  buttons.forEach(b => { b.disabled = true; });   // one save at a time
+  $('langMsg').textContent = '';
+  const r = await call('set_language', { lang });
+  buttons.forEach(b => { b.disabled = false; });
+  // on the first start a failure is told in the language just tapped; once a language is saved the
+  // page keeps it (the next status would switch back anyway)
+  if (r.ok || !lastStatus.lang) setLanguage(lang);
+  if (r.ok) closeLanguages();
+  else $('langMsg').textContent = t("没能保存语言设置，请再试一次");
+}
+function renderStatus() {
+  const st = lastStatus;
   const ip = (st.ip || '').split(',').filter(Boolean);
   const online = ip.length > 0;
-  $('ip').textContent = online ? ip.join('  ') : '未联网';
+  $('ip').textContent = online ? ip.join('  ') : t("未联网");
   $('host').textContent = st.host || '—';
-  $('ssid').textContent = st.ssid || (online ? '有线 / USB' : '未连接');
-  $('ssh').innerHTML = `ssh ubuntu@${esc(ip[0] || '<设备 IP>')}<br>sudo kiosk-mode url http://你的地址`;
+  $('ssid').textContent = st.ssid || (online ? t("有线 / USB") : t("未连接"));
+  $('ssh').innerHTML = `ssh ubuntu@${esc(ip[0] || '<' + t("设备 IP") + '>')}<br>sudo kiosk-mode url http://${esc(t("你的地址"))}`;
+  $('chipLang').textContent = document.querySelector(`[data-lang="${KioskI18n.locale}"]`).textContent;
   const box = $('status');
   box.classList.toggle('offline', !online);
   if (!online) {
-    $('statusText').textContent = '设备还没有联网';
-    $('statusSub').textContent = '点右边的按钮连接 Wi‑Fi';
+    $('statusText').textContent = t("设备还没有联网");
+    $('statusSub').textContent = t("点右边的按钮连接 Wi‑Fi");
   } else if (st.target) {
-    $('statusText').textContent = '展示页面暂时打不开，正在等待它启动';
-    $('statusSub').textContent = st.target + (st.tries ? `  ·  已重试 ${st.tries} 次` : '');
+    $('statusText').textContent = t("展示页面暂时打不开，正在等待它启动");
+    $('statusSub').textContent = st.target + (Number(st.tries) > 0 ? '  ·  ' + t("已重试 {tries} 次", { tries: st.tries }) : '');
   } else {
-    $('statusText').textContent = '还没有设置展示页面';
-    $('statusSub').textContent = '按右侧的方法装上小智客户端，或设置你自己的地址';
+    $('statusText').textContent = t("还没有设置展示页面");
+    $('statusSub').textContent = t("按右侧的方法装上小智客户端，或设置你自己的地址");
   }
   drawQr(st.help || 'https://github.com/ohimsmart/oh-im-smart-gateway');
-};
+}
 
 /* ---- talking to thinksmart-kiosk.py ---- */
 const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.thinksmart;
@@ -349,24 +436,24 @@ function mock(m) {
 }
 
 /* ---- Wi-Fi sheet ---- */
-const REASONS = {
-  password: '密码不对，请再试一次',
-  notfound: '找不到这个网络，可能离得太远或名称有误',
-  timeout: '连接超时，请靠近路由器后再试',
-  noreply: '设备没有回应，请过一会儿再看看网络状态',
-};
+const REASON = r => ({
+  password: t("密码不对，请再试一次"),
+  notfound: t("找不到这个网络，可能离得太远或名称有误"),
+  timeout: t("连接超时，请靠近路由器后再试"),
+  noreply: t("设备没有回应，请过一会儿再看看网络状态"),
+})[r];
 let nets = [], target = null, fields = { ssid: '', pw: '' }, showPw = false, busy = false;
 
 function openSheet() {
   $('sheet').classList.add('open');
-  call('busy', { value: true });  // keep the kiosk from switching pages under the user's fingers
+  holdPage();  // keep the kiosk from switching pages under the user's fingers
   showList();
   scan();
 }
 function closeSheet() {
   if (document.activeElement) document.activeElement.blur();
   $('sheet').classList.remove('open');
-  call('busy', { value: false });
+  holdPage();  // the language picker may still hold the page
 }
 function showPane(id) {
   for (const p of document.querySelectorAll('.pane')) p.classList.toggle('on', p.id === id);
@@ -375,11 +462,11 @@ function showList() { showPane('paneList'); renderNets(); }
 
 async function scan() {
   $('btnScan').classList.add('spin');
-  if (!nets.length) $('nets').innerHTML = '<div class="empty">正在搜索附近的 Wi‑Fi…</div>';
+  if (!nets.length) $('nets').innerHTML = `<div class="empty">${t("正在搜索附近的 Wi‑Fi…")}</div>`;
   const r = await call('scan');
   $('btnScan').classList.remove('spin');
   nets = r.ok ? r.networks : [];
-  renderNets(r.ok ? '' : '搜索失败，点右上角刷新再试');
+  renderNets(r.ok ? '' : t("搜索失败，点右上角刷新再试"));
 }
 
 function bars(signal) {
@@ -392,14 +479,14 @@ function renderNets(error) {
   const box = $('nets');
   box.textContent = '';
   if (error || !nets.length) {
-    box.innerHTML = `<div class="empty">${error || '附近没有搜到 Wi‑Fi'}</div>`;
+    box.innerHTML = `<div class="empty">${error || t("附近没有搜到 Wi‑Fi")}</div>`;
     return;
   }
   for (const n of nets) {
     const b = document.createElement('button');
     b.className = 'net' + (n.active ? ' cur' : '');
     b.innerHTML = `${bars(n.signal)}<span class="name">${esc(n.ssid)}</span>` +
-      (n.active ? '<span class="meta">已连接</span>' : n.saved ? '<span class="meta saved">已保存</span>' : '') +
+      (n.active ? `<span class="meta">${t("已连接")}</span>` : n.saved ? `<span class="meta saved">${t("已保存")}</span>` : '') +
       (n.secure ? LOCK : '');
     b.addEventListener('click', () => join(n, false));
     box.appendChild(b);
@@ -413,12 +500,13 @@ function join(net, hidden) {
              mode: net && net.active ? 'info' : net && net.saved ? 'saved' : 'type' };
   fields = { ssid: target.ssid, pw: '' };
   showPw = false;
-  $('joinTitle').textContent = hidden ? '添加隐藏网络' : target.ssid;
-  const quality = !net ? '' : net.signal > 75 ? '信号很好' : net.signal > 50 ? '信号良好' : net.signal > 25 ? '信号一般' : '信号较弱';
-  $('joinHint').textContent = hidden ? '输入网络名称和密码（没有密码就留空），然后点「连接」'
-    : target.mode === 'info' ? '已连接 · ' + quality
-    : target.mode === 'saved' ? '已保存的网络 · ' + quality + '，点「连接」用保存的密码连接'
-    : (target.secure ? '加密网络 · ' + quality + '，输入密码后点「连接」' : '开放网络 · ' + quality);
+  $('joinTitle').textContent = hidden ? t("添加隐藏网络") : target.ssid;
+  const quality = !net ? '' : net.signal > 75 ? t("信号很好") : net.signal > 50 ? t("信号良好")
+    : net.signal > 25 ? t("信号一般") : t("信号较弱");
+  $('joinHint').textContent = hidden ? t("输入网络名称和密码（没有密码就留空），然后点「连接」")
+    : target.mode === 'info' ? t("已连接 · {quality}", { quality })
+    : target.mode === 'saved' ? t("已保存的网络 · {quality}，点「连接」用保存的密码连接", { quality })
+    : target.secure ? t("加密网络 · {quality}，输入密码后点「连接」", { quality }) : t("开放网络 · {quality}", { quality });
   setMsg('');
   showPane('paneJoin');
   renderFields();
@@ -445,9 +533,9 @@ function renderFields() {
   if ($('inSsid').value !== fields.ssid) $('inSsid').value = fields.ssid;
   if ($('inPw').value !== fields.pw) $('inPw').value = fields.pw;
   $('inPw').type = showPw ? 'text' : 'password';
-  $('inPw').placeholder = target.hidden ? '没有密码就留空' : '至少 8 位';
+  $('inPw').placeholder = target.hidden ? t("没有密码就留空") : t("至少 8 位");
   $('inSsid').disabled = $('inPw').disabled = busy;
-  $('btnEye').textContent = showPw ? '隐藏' : '显示';
+  $('btnEye').textContent = showPw ? t("隐藏") : t("显示");
   // fields and keyboard only while typing; forgetting only for a network that has a saved profile
   $('fieldSsid').style.display = typing() && target.hidden ? '' : 'none';
   $('fieldPw').style.display = typing() && target.secure ? '' : 'none';
@@ -467,7 +555,7 @@ async function connect() {
   busy = true;
   renderFields();
   const usingSaved = target.mode === 'saved';
-  setMsg(usingSaved ? `正在用已保存的密码连接 ${fields.ssid}…` : `正在连接 ${fields.ssid}…`, 'wait');
+  setMsg(usingSaved ? t("正在用已保存的密码连接 {ssid}…", { ssid: fields.ssid }) : t("正在连接 {ssid}…", { ssid: fields.ssid }), 'wait');
   connectId = seq + 1;  // the id call() is about to use: progress reports carry it
   const r = await call('connect', { ssid: fields.ssid, password: usingSaved || !target.secure ? '' : fields.pw,
                                      hidden: !!target.hidden });
@@ -478,7 +566,7 @@ async function connect() {
     // user may still want to forget a network; × leaves
     target.mode = 'info';
     target.saved = true;
-    setMsg(`已连接 ${fields.ssid}`, 'ok');
+    setMsg(t("已连接 {ssid}", { ssid: fields.ssid }), 'ok');
     renderFields();
     setTimeout(() => { if (!busy && $('paneJoin').classList.contains('on')) { showList(); scan(); } }, 1500);
     return;
@@ -486,62 +574,64 @@ async function connect() {
   // Whatever went wrong, let the user type a password next
   if (target.secure) target.mode = 'type';
   if (r.reason === 'password') fields.pw = '';
-  setMsg(usingSaved && r.reason === 'password' ? '保存的密码已失效，请重新输入'
-    : REASONS[r.reason] || ('连接失败' + (r.detail ? '：' + r.detail : '')), 'bad');
+  setMsg(usingSaved && r.reason === 'password' ? t("保存的密码已失效，请重新输入")
+    : REASON(r.reason) || (r.detail ? t("连接失败：{detail}", { detail: r.detail }) : t("连接失败")), 'bad');
   renderFields();
   focusField();
 }
 
 // Stages reported by thinksmart-kiosk.py while it joins (from wpa_supplicant's state)
-const STAGES = {
-  scan: '正在搜索网络…',
-  join: '正在连接路由器…',
-  auth: '正在验证密码…',
-  ip: '密码正确，正在获取网络地址…',
-};
+const STAGE = s => ({
+  scan: t("正在搜索网络…"),
+  join: t("正在连接路由器…"),
+  auth: t("正在验证密码…"),
+  ip: t("密码正确，正在获取网络地址…"),
+})[s];
 let connectId = null;
 window.thinksmartProgress = function (p) {
-  if (busy && p.id === connectId && STAGES[p.stage]) setMsg(STAGES[p.stage], 'wait');
+  if (busy && p.id === connectId && STAGE(p.stage)) setMsg(STAGE(p.stage), 'wait');
 };
 
 async function forget() {
   if (busy) return;
   busy = true;
   const ssid = target.ssid;
-  setMsg(`正在忘记 ${ssid}…`, 'wait');
+  setMsg(t("正在忘记 {ssid}…", { ssid }), 'wait');
   renderFields();
   const r = await call('forget', { ssid });
   busy = false;
   if (!r.ok) {
-    setMsg(`没能忘记 ${ssid}，请再试一次`, 'bad');
+    setMsg(t("没能忘记 {ssid}，请再试一次", { ssid }), 'bad');
     return renderFields();
   }
   target.saved = false;
-  setMsg(`已忘记 ${ssid}，下次连接需要重新输入密码`, 'ok');
+  setMsg(t("已忘记 {ssid}，下次连接需要重新输入密码", { ssid }), 'ok');
   renderFields();
   nets = nets.map(n => n.ssid === ssid ? Object.assign({}, n, { saved: false }) : n);
   setTimeout(() => { if (!busy) { showList(); scan(); } }, 1400);
 }
 
 /* ---- updates (client and system layer): the root updater installs, this page only shows and asks (via thinksmart-kiosk.py) ---- */
-const UPD_STAGE = { preparing: '正在准备', downloading: '正在下载', installing: '正在安装',
-                    testing: '正在重启并自检', rolling_back: '自检没通过，正在退回' };
+const UPD_STAGE = () => ({ preparing: t("正在准备"), downloading: t("正在下载"), installing: t("正在安装"),
+                           testing: t("正在重启并自检"), rolling_back: t("自检没通过，正在退回") });
 // job.reboot from the updater; an older updater only says it in its Chinese message
 const needsReboot = job => (typeof job.reboot === 'boolean' ? job.reboot : /重启设备后生效/.test(job.message || ''));
+// the updater's result in this page's language; an older updater's job has only its Chinese message
+const updMsg = job => KioskI18n.text(job.msg_key ? job : job.message || '');
 // a failed or rolled-back result; the system layer before it may still need a restart (spec §6.1)
-const updFail = job => (job.message || '') + (job.state !== 'done' && needsReboot(job) ? '。系统层的部分改动重启设备后生效' : '');
+const updFail = job => updMsg(job) + (job.state !== 'done' && needsReboot(job) ? t("。") + t("系统层的部分改动重启设备后生效") : '');
 let upd = null, updArmed = 0;
 let updStarting = 0;   // request sent, the updater hasn't reported yet (it takes a few seconds to start)
 function updParts(u) {
   // what one tap installs, in the updater's order: the system layer first
   const parts = [], sa = (u.system || {}).available;
-  if (sa && !(sa.missing || []).length) parts.push({ key: 'system', name: '系统层', ...sa });
-  if (u.available) parts.push({ key: 'client', name: '客户端', ...u.available });
+  if (sa && !(sa.missing || []).length) parts.push({ key: 'system', name: t("系统层"), ...sa });
+  if (u.available) parts.push({ key: 'client', name: t("客户端"), ...u.available });
   return parts;
 }
 function renderUpdate() {
   const u = upd || {}, job = u.job || {}, sys = u.system || {}, parts = updParts(u);
-  const busy = job.state in UPD_STAGE;
+  const busy = job.state in UPD_STAGE();
   // between the confirming tap and the updater's first report: don't show 更新 again (looks like
   // the tap missed); ends when the updater reports or after 30 s of silence
   if (updStarting && (busy || (job.time || 0) * 1000 > updStarting - 2000 || Date.now() - updStarting > 30000)) updStarting = 0;
@@ -551,28 +641,33 @@ function renderUpdate() {
   $('upd').classList.toggle('on', !!(parts.length || busy || result || starting));
   let title, text, bad = false;
   if (starting) {
-    title = '正在开始更新…';
-    text = '正在连接更新服务器，请稍等';
+    title = t("正在开始更新…");
+    text = t("正在连接更新服务器，请稍等");
   } else if (busy) {
-    title = `正在更新${job.component === 'system' ? '系统层' : '客户端'} ${job.version}`;
+    title = job.component === 'system' ? t("正在更新系统层 {version}", { version: job.version })
+      : t("正在更新客户端 {version}", { version: job.version });
     const pct = job.state === 'downloading' && job.progress != null ? ` ${Math.round(job.progress * 100)}%` : '';
-    text = `${UPD_STAGE[job.state]}${pct}，请不要断电`;
+    text = t("{stage}{pct}，请不要断电", { stage: UPD_STAGE()[job.state], pct });
   } else if (parts.length) {
-    title = '有新版本 ' + parts.map(p => `${p.name} ${p.version}`).join(' · ');
+    title = t("有新版本 {list}", { list: parts.map(p => `${p.name} ${p.version}`).join(' · ') });
     bad = !!result && job.state !== 'done';
-    text = bad ? updFail(job) : (u.current ? `当前：客户端 ${u.current}` + (sys.current ? ` · 系统层 ${sys.current}` : '') : '小智客户端');
+    text = bad ? updFail(job) : !u.current ? t("小智客户端")
+      : sys.current ? t("当前：客户端 {client} · 系统层 {system}", { client: u.current, system: sys.current })
+      : t("当前：客户端 {client}", { client: u.current });
     if (Date.now() - updArmed < 5000) {
       // waiting for the confirming tap: keep the hint (the status poll re-renders every 3 s)
       bad = false;
-      text = `更新时${parts.some(p => p.key === 'system') ? '屏幕会闪一下、' : ''}客户端会重启（约 ${parts.length > 1 ? 2 : 1} 分钟），再点一下「确认更新」开始`;
+      text = parts.some(p => p.key === 'system')
+        ? t("更新时屏幕会闪一下、客户端会重启（约 {minutes} 分钟），再点一下「确认更新」开始", { minutes: parts.length > 1 ? 2 : 1 })
+        : t("更新时客户端会重启（约 {minutes} 分钟），再点一下「确认更新」开始", { minutes: 1 });
     }
   } else {
-    title = job.state === 'done' ? '更新完成' : '更新没有完成';
+    title = job.state === 'done' ? t("更新完成") : t("更新没有完成");
     // the state the update left, both versions: one tap installs the system layer then the client,
     // and an older updater keeps only the last one's message
     text = job.state === 'done' && u.current && sys.current
-      ? `现在是 系统层 ${sys.current} · 客户端 ${u.current}`
-        + (needsReboot(job) ? '，部分改动重启设备后生效' : '')
+      ? t("现在是 系统层 {system} · 客户端 {client}", { system: sys.current, client: u.current })
+        + (needsReboot(job) ? t("，部分改动重启设备后生效") : '')
       : updFail(job);
     bad = job.state !== 'done';
   }
@@ -580,10 +675,10 @@ function renderUpdate() {
   $('updSub').textContent = text || '';
   $('updSub').classList.toggle('bad', !!bad);
   $('updNotes').innerHTML = parts.length && !busy && !starting
-    ? parts.map(p => (parts.length > 1 ? `<li class="h">${p.name} ${esc(p.version)}</li>` : '')
+    ? parts.map(p => (parts.length > 1 ? `<li class="h">${esc(p.name)} ${esc(p.version)}</li>` : '')
                      + (p.notes || []).map(n => `<li>${esc(n)}</li>`).join('')).join('') : '';
   $('updBtn').hidden = !parts.length || busy || starting;
-  $('updBtn').textContent = Date.now() - updArmed < 5000 ? '确认更新' : '更新';
+  $('updBtn').textContent = Date.now() - updArmed < 5000 ? t("确认更新") : t("更新");
 }
 async function pollUpdate() {
   const r = await call('update_status');
@@ -604,10 +699,13 @@ $('updBtn').addEventListener('click', async () => {
   renderUpdate();
   setTimeout(renderUpdate, 30100);
   const r = await call('update_install', { version: cli ? cli.version : '', system: sys ? sys.version : '' });
-  if (!r.ok) { updStarting = 0; renderUpdate(); $('updSub').textContent = '没能开始更新'; $('updSub').classList.add('bad'); }
+  if (!r.ok) { updStarting = 0; renderUpdate(); $('updSub').textContent = t("没能开始更新"); $('updSub').classList.add('bad'); }
   else pollUpdate();
 });
 
+for (const b of document.querySelectorAll('[data-lang]')) b.addEventListener('click', () => chooseLanguage(b.dataset.lang));
+$('chipLang').addEventListener('click', openLanguages);
+$('langClose').addEventListener('click', closeLanguages);
 $('ctaWifi').addEventListener('click', openSheet);
 $('chipWifi').addEventListener('click', openSheet);
 $('btnClose').addEventListener('click', closeSheet);

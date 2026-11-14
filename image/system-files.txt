@@ -31,6 +31,9 @@ kiosk/kiosk-mode                    /usr/local/bin/kiosk-mode                   
 kiosk/welcome.html                  /usr/local/share/thinksmart-kiosk/welcome.html  644 root kiosk
 kiosk/keyboard.js                   /usr/local/share/thinksmart-kiosk/keyboard.js   644 root kiosk
 kiosk/qrcode.js                     /usr/local/share/thinksmart-kiosk/qrcode.js     644 root kiosk
+kiosk/i18n.js                       /usr/local/share/thinksmart-kiosk/i18n.js       644 root kiosk
+kiosk/zh-Hant.js                    /usr/local/share/thinksmart-kiosk/zh-Hant.js    644 root kiosk
+kiosk/en.js                         /usr/local/share/thinksmart-kiosk/en.js         644 root kiosk
 kiosk/thinksmart-kiosk.service      /etc/systemd/system/thinksmart-kiosk.service    644 root kiosk
 kiosk/thinksmart-kiosk.pam          /etc/pam.d/thinksmart-kiosk                     644 root kiosk
 kiosk/thinksmart-kiosk.conf         /etc/thinksmart-kiosk.conf                      644 root keep

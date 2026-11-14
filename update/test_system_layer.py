@@ -344,8 +344,9 @@ def test_make_release_carries_the_system_layer(tmp_path):
     # without the repository's own system-v* tags: this test makes its own
     subprocess.run(['git', 'clone', '-q', '--no-tags', str(REPO), str(img)], check=True)
     # this branch's uncommitted work as it would be committed
-    for f in subprocess.run(['git', '-C', str(REPO), 'ls-files', '-mo', '--exclude-standard'],
-                            capture_output=True, text=True, check=True).stdout.split():
+    work = [['ls-files', '-mo', '--exclude-standard'], ['diff', '--cached', '--name-only', '--diff-filter=AM']]
+    for f in {f for cmd in work for f in subprocess.run(['git', '-C', str(REPO), *cmd],
+                                                         capture_output=True, text=True, check=True).stdout.split()}:
         (img / f).parent.mkdir(parents=True, exist_ok=True)
         (img / f).write_bytes((REPO / f).read_bytes())
     git = lambda *a: subprocess.run(['git', '-C', str(img), *a], check=True, capture_output=True)
