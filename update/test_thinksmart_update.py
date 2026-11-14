@@ -63,6 +63,7 @@ def test_check_clears_a_download_that_was_killed(tu):
     assert st['job']['state'] == 'failed'
     assert '中断' in st['job']['message'] and '断电' not in st['job']['message']
     assert st['check_error'] == '没有配置更新地址'          # and the check itself still ran
+    assert st['check_error_msg'] == {'msg_key': '没有配置更新地址', 'msg_params': {}}
     assert not (tu.CLIENT / '1.2.0.new').exists()
 
 
@@ -98,7 +99,7 @@ def test_killed_during_self_test_rolls_back_if_it_fails(tu):
     tu.PENDING.write_text(json.dumps({'from': '1.1.0', 'to': '1.2.0', 'previous': None,
                                       'need_hub': False}))
     job_left(tu, 'testing')
-    tu.self_test = lambda version, need_hub, s: (version == '1.1.0', '新版本没有启动起来')
+    tu.self_test = lambda version, need_hub, s: (version == '1.1.0', tu.msg('新版本没有启动起来'))
     tu.run_main('check')
     assert tu.load_status()['job']['state'] == 'rolled_back'
     assert tu.current_version() == '1.1.0'
@@ -206,6 +207,7 @@ def test_check_finds_an_unsigned_release(tu, source):
     tu.run_main('check')
     st = tu.load_status()
     assert st['check_error'] is None and st['available']['version'] == '1.2.0'
+    assert st['check_error_msg'] is None
 
 
 @pytest.mark.parametrize('bad', [
@@ -248,6 +250,7 @@ def test_an_older_manifest_is_not_taken(tu, source):
     source['publish'](published='2026-10-01T10:00:00+08:00')
     tu.run_main('check')
     assert tu.load_status()['check_error'] == '连不上更新服务器'
+    assert tu.load_status()['check_error_msg'] == {'msg_key': '连不上更新服务器', 'msg_params': {}}
 
 
 def test_a_cut_download_fails_cleanly_in_chinese(tu, source, monkeypatch):

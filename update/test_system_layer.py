@@ -227,11 +227,18 @@ def test_failed_self_test_puts_every_file_back(sysu, release, tmp_path):
     mode = sysu.target('/usr/local/bin/thinksmart-kiosk.py').stat().st_mode
     sysu.run_main('check')
     # the new files fail, the old ones (after the rollback restarted everything again) pass
-    sysu.system_self_test = lambda actions, need_hub, seconds, need_audio=True: (len(sysu.effects) > 1, '屏幕界面没有启动起来')
+    sysu.system_self_test = lambda actions, need_hub, seconds, need_audio=True: (len(sysu.effects) > 1, sysu.SYS_CHECK_WHY['kiosk'])
     assert sysu.install_system(sysu.read_conf(), '0.2.0') == 1
     st = sysu.load_status()
     assert st['job']['state'] == 'rolled_back' and st['job']['component'] == 'system'
     assert '屏幕界面没有启动起来' in st['job']['message'] and '已退回 0.1.0' in st['job']['message']
+    # what the pages translate (spec §6.1): the reason nested twice, the Chinese text unchanged
+    assert {k: st['job'][k] for k in ('msg_key', 'msg_params')} == {
+        'msg_key': '系统层 {version} {why}，已退回 {old}',
+        'msg_params': {'version': '0.2.0', 'old': '0.1.0',
+                       'why': {'msg_key': '没装成功（{why}）',
+                               'msg_params': {'why': {'msg_key': '屏幕界面没有启动起来', 'msg_params': {}}}}}}
+    assert st['job']['message'] == '系统层 0.2.0 没装成功（屏幕界面没有启动起来），已退回 0.1.0'
     assert device_files(sysu) == before                       # new files gone, edited ones back
     assert sysu.target('/usr/local/bin/thinksmart-kiosk.py').stat().st_mode == mode
     assert sysu.system_version() == '0.1.0' and st['system']['failed'] == '0.2.0'
@@ -425,7 +432,7 @@ def test_a_damaged_backup_copy_is_not_restored(sysu, release):
             i = next(n for n, it in enumerate(index) if it['dest'] == '/usr/local/bin/thinksmart-kiosk.py')
             index_of['kiosk'] = i
             (sysu.SYS_BACKUP / 'files' / str(i)).write_bytes(b'')
-            return False, '屏幕界面没有启动起来'
+            return False, sysu.SYS_CHECK_WHY['kiosk']
         return True, ''
     sysu.system_self_test = fail_after_damaging
     assert sysu.install_system(sysu.read_conf(), '0.2.0') == 1
@@ -508,9 +515,11 @@ def test_one_tap_for_both_reports_both(sysu, release):
     """The pages show the last job's message: after system layer + client it must name both."""
     release(client='1.2.0')
     sysu.run_main('check')
-    sysu.install_system = lambda conf, v: (sysu.set_job(sysu.load_status(), 'done', v, f'系统层已更新到 {v}',
+    sysu.install_system = lambda conf, v: (sysu.set_job(sysu.load_status(), 'done', v,
+                                                        sysu.msg('系统层已更新到 {version}', version=v),
                                                         component='system'), 0)[1]
-    sysu.install = lambda conf, v: (sysu.set_job(sysu.load_status(), 'done', v, f'已更新到 {v}'), 0)[1]
+    sysu.install = lambda conf, v: (sysu.set_job(sysu.load_status(), 'done', v,
+                                                 sysu.msg('已更新到 {version}', version=v)), 0)[1]
     (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '1.2.0', 'system': '0.2.0'}))
     assert sysu.run_main('run') == 0
     assert sysu.load_status()['job']['message'] == '已更新到 系统层 0.2.0 · 客户端 1.2.0'

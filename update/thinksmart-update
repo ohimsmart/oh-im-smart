@@ -103,8 +103,25 @@ UNIT_RE = re.compile(r'[A-Za-z0-9@_.-]+\.(service|timer|path|socket)')
 PKG_RE = re.compile(r'[a-z0-9][a-z0-9.+-]*')
 
 
+def msg(key, **params):
+    """A message for the pages (spec §6.1): its Simplified Chinese template, which is also the key the
+    pages translate, and the values of its {placeholders}: plain text (a version, a file name, a
+    library's error, shown as it is) or another msg()."""
+    return {'msg_key': key, 'msg_params': params}
+
+
+def msg_text(m):
+    """A msg() in Chinese: the job's `message`, which older pages show."""
+    return m['msg_key'].format_map({k: msg_text(v) if isinstance(v, dict) else v
+                                    for k, v in m['msg_params'].items()})
+
+
 class Fail(Exception):
-    """An error to show on the page as it is (Chinese, for the user)."""
+    """An error to show on the page, keyed like msg(): Fail(key, **params). str() is its Chinese."""
+
+    def __init__(self, key, **params):
+        self.msg = {'msg_key': key, 'msg_params': params}
+        super().__init__(msg_text(self.msg))
 
 
 def log(*args):
@@ -155,11 +172,13 @@ def save_status(st):
     tmp.replace(STATUS)
 
 
-def set_job(st, state, version, message='', progress=None, component='client'):
-    st['job'] = {'state': state, 'version': version, 'message': message, 'progress': progress,
-                 'time': int(time.time()), 'component': component}
+def set_job(st, state, version, message, progress=None, component='client'):
+    """message: a msg(). The job keeps it as Chinese text in `message` (older pages show that) and as
+    msg_key/msg_params (the pages translate those)."""
+    st['job'] = {'state': state, 'version': version, 'message': msg_text(message), **message,
+                 'progress': progress, 'time': int(time.time()), 'component': component}
     save_status(st)
-    log(f'[{component} {state}] {version} {message}')
+    log(f'[{component} {state}] {version} {st["job"]["message"]}')
 
 
 def version_key(v):
@@ -306,8 +325,9 @@ def download(conf, m, item, st, version, done_before, total):
                     f.write(chunk)
                     if time.monotonic() - shown > 1:
                         shown = time.monotonic()
-                        set_job(st, 'downloading', version, '正在下载', (done_before + got) / total,
-                                (st.get('job') or {}).get('component', 'client'))
+                        job = st.get('job') or {}
+                        set_job(st, 'downloading', version, msg('正在下载'), (done_before + got) / total,
+                                job.get('component', 'client'))
         # a connection cut half way raises http.client.IncompleteRead, not an OSError
         except (OSError, urllib.error.URLError, http.client.HTTPException) as e:
             last_error = e
@@ -380,7 +400,7 @@ def health():
 
 def self_test(version, need_hub, seconds):
     """(True, '') once the client reports this version with audio (and the hub, if it was reachable
-    before the update); (False, why) after `seconds`."""
+    before the update); (False, why) after `seconds`, why a msg()."""
     end = time.monotonic() + seconds
     h = None
     while time.monotonic() < end:
@@ -395,12 +415,12 @@ def self_test(version, need_hub, seconds):
             if h2 and h2.get('version') == version:
                 return True, ''
     if not h:
-        return False, f'新版本 {seconds} 秒内没有启动起来'
+        return False, msg('新版本 {seconds} 秒内没有启动起来', seconds=seconds)
     if h.get('version') != version:
-        return False, '新版本没有启动起来'
+        return False, msg('新版本没有启动起来')
     if not h.get('audio'):
-        return False, '新版本打不开麦克风或扬声器'
-    return False, '新版本连不上小智网关'
+        return False, msg('新版本打不开麦克风或扬声器')
+    return False, msg('新版本连不上小智网关')
 
 
 def cleanup():
@@ -426,13 +446,13 @@ def install(conf, version):
     st = load_status()
     cur = current_version()
     try:
-        set_job(st, 'preparing', version, '正在准备')
+        set_job(st, 'preparing', version, msg('正在准备'))
         m = fetch_manifest(conf, st)       # again: something newer may have been published since
         if m['version'] != version:
             note_available(st, m, cur)
-            raise Fail(f'更新服务器上的版本已经变成 {m["version"]}，请重新点更新')
+            raise Fail('更新服务器上的版本已经变成 {version}，请重新点更新', version=m['version'])
         if cur and version_key(version) <= version_key(cur):
-            raise Fail(f'{version} 不比现在的 {cur} 新')
+            raise Fail('{version} 不比现在的 {current} 新', version=version, current=cur)
         files = m['files']
         total = download_size(m)
         if shutil.disk_usage(OPT).free < total * 4 + SPARE:   # download + unpacked (~3x)
@@ -440,14 +460,14 @@ def install(conf, version):
         before = health()
         need_hub = bool(before and before.get('hub'))
 
-        set_job(st, 'downloading', version, '正在下载', 0)
+        set_job(st, 'downloading', version, msg('正在下载'), 0)
         code = download(conf, m, files['code'], st, version, 0, total)
         env_id = files['env']['id']
         env_tgz = None
         if not env_present(env_id):
             env_tgz = download(conf, m, files['env'], st, version, files['code']['size'], total)
 
-        set_job(st, 'installing', version, '正在安装')
+        set_job(st, 'installing', version, msg('正在安装'))
         new_dir = CLIENT / f'{version}.new'
         extract(code, new_dir, True)
         if env_tgz:
@@ -458,11 +478,11 @@ def install(conf, version):
             shutil.rmtree(CLIENT / version)
         os.replace(new_dir, CLIENT / version)
     except Fail as e:
-        set_job(st, 'failed', version, str(e))
+        set_job(st, 'failed', version, e.msg)
         return 1
     except Exception as e:  # noqa: BLE001 - anything else still has to reach the page
         log('install failed:', repr(e))
-        set_job(st, 'failed', version, f'安装出错：{e}')
+        set_job(st, 'failed', version, msg('安装出错：{error}', error=str(e)))
         return 1
 
     pending = {'from': cur, 'to': version, 'previous': previous_version(), 'need_hub': need_hub}
@@ -471,7 +491,7 @@ def install(conf, version):
     write_durable(PENDING, json.dumps(pending))
     set_link('previous', cur)
     set_link('current', version)
-    set_job(st, 'testing', version, '正在重启并自检')
+    set_job(st, 'testing', version, msg('正在重启并自检'))
     restart_client(version)
     return finish(conf, st, pending, TEST_SECONDS)
 
@@ -485,14 +505,14 @@ def finish(conf, st, pending, seconds):
         st['current'] = version
         st['available'] = None
         st.pop('failed', None)
-        set_job(st, 'done', version, f'已更新到 {version}')
+        set_job(st, 'done', version, msg('已更新到 {version}', version=version))
         cleanup()
         return 0
     log('self-test failed:', why)
     if not old:
-        set_job(st, 'failed', version, why + '，也没有可以退回的版本')
+        set_job(st, 'failed', version, msg('{why}，也没有可以退回的版本', why=why))
         return 1
-    set_job(st, 'rolling_back', version, why + f'，正在退回 {old}')
+    set_job(st, 'rolling_back', version, msg('{why}，正在退回 {old}', why=why, old=old))
     set_link('current', old)
     set_link('previous', pending.get('previous'))
     restart_client(old)
@@ -502,10 +522,12 @@ def finish(conf, st, pending, seconds):
     ok_old, _ = self_test(old, False, seconds)
     shutil.rmtree(CLIENT / version, ignore_errors=True)
     cleanup()
-    msg = f'{version} 自检没通过（{why}），已退回 {old}'
-    if not ok_old:
-        msg += '，但退回后客户端也没正常启动，请重启设备'
-    set_job(st, 'rolled_back', version, msg)
+    if ok_old:
+        done = msg('{version} 自检没通过（{why}），已退回 {old}', version=version, why=why, old=old)
+    else:
+        done = msg('{version} 自检没通过（{why}），已退回 {old}，但退回后客户端也没正常启动，请重启设备',
+                   version=version, why=why, old=old)
+    set_job(st, 'rolled_back', version, done)
     return 1
 
 
@@ -551,7 +573,7 @@ def read_table(tree):
             requires.append(parts[1])
             continue
         if len(parts) != 5:
-            raise Fail(f'系统层文件表有一行看不懂：{line}')
+            raise Fail('系统层文件表有一行看不懂：{line}', line=line)
         src, dest, mode, owner, acts = parts
         actions = acts.split(',')
         ok = (dest.startswith(DEST_PREFIXES) and os.path.normpath(dest) == dest and '..' not in dest
@@ -560,7 +582,7 @@ def read_table(tree):
                                   and not src.startswith('/') and (tree / src).is_file()
                                   and not (tree / src).is_symlink())))
         if not ok:
-            raise Fail(f'系统层文件表有一行不对：{line}')
+            raise Fail('系统层文件表有一行不对：{line}', line=line)
         seen.add(dest)
         entries.append((src, dest, mode, owner, actions))
     if not entries:
@@ -831,8 +853,8 @@ def system_checks(actions, need_hub, need_audio=True):
     return out
 
 
-SYS_CHECK_WHY = {'kiosk': '屏幕界面没有启动起来', 'audio': '麦克风或扬声器没有恢复',
-                 'updater': '新的更新服务启动不了', 'bluetooth': '蓝牙服务没有启动起来'}
+SYS_CHECK_WHY = {'kiosk': msg('屏幕界面没有启动起来'), 'audio': msg('麦克风或扬声器没有恢复'),
+                 'updater': msg('新的更新服务启动不了'), 'bluetooth': msg('蓝牙服务没有启动起来')}
 
 
 def system_self_test(actions, need_hub, seconds, need_audio=True):
@@ -848,7 +870,7 @@ def system_self_test(actions, need_hub, seconds, need_audio=True):
                 return True, ''
     bad = [k for k, v in first.items() if v is None] or list(first)
     k = bad[0] if bad else ''
-    return False, SYS_CHECK_WHY.get(k, f'{k.partition(":")[2] or k} 没有正常运行')
+    return False, SYS_CHECK_WHY.get(k) or msg('{unit} 没有正常运行', unit=k.partition(':')[2] or k)
 
 
 def write_record(version, tree, entries):
@@ -891,8 +913,9 @@ def system_restore():
 
 
 def system_rollback(st, pending, why, seconds):
+    """why: a msg(), a clause saying what went wrong (installation failed, or the last update was cut off)."""
     version, old = pending['to'], pending['from']
-    set_job(st, 'rolling_back', version, why + f'，正在退回 {old}', component='system')
+    set_job(st, 'rolling_back', version, msg('{why}，正在退回 {old}', why=why, old=old), component='system')
     system_restore()
     actions = sorted(set(pending.get('actions') or []) | {'reload'})
     take_effect(actions)
@@ -904,10 +927,12 @@ def system_rollback(st, pending, why, seconds):
                              pending.get('need_audio', True))
     shutil.rmtree(SYSTEM / 'new', ignore_errors=True)
     shutil.rmtree(DOWNLOAD, ignore_errors=True)
-    msg = f'系统层 {version} {why}，已退回 {old}'
-    if not ok:
-        msg += '，但退回后还有服务没正常启动，请重启设备'
-    set_job(st, 'rolled_back', version, msg, component='system')
+    if ok:
+        done = msg('系统层 {version} {why}，已退回 {old}', version=version, why=why, old=old)
+    else:
+        done = msg('系统层 {version} {why}，已退回 {old}，但退回后还有服务没正常启动，请重启设备',
+                   version=version, why=why, old=old)
+    set_job(st, 'rolled_back', version, done, component='system')
     return 1
 
 
@@ -916,25 +941,26 @@ def install_system(conf, version):
     cur = system_version()
     tree = SYSTEM / 'new'
     try:
-        set_job(st, 'preparing', version, '正在准备', component='system')
+        set_job(st, 'preparing', version, msg('正在准备'), component='system')
         m = fetch_manifest(conf, st)
         note_system(st, m)
         s = m.get('system')
         if not s or not valid_system(s) or s['version'] != version:
             raise Fail('更新服务器上的系统层版本变了，请重新点更新')
         if version_key(version) <= version_key(cur):
-            raise Fail(f'系统层 {version} 不比现在的 {cur} 新')
+            raise Fail('系统层 {version} 不比现在的 {current} 新', version=version, current=cur)
         missing = [p for p in s.get('requires', []) if not pkg_installed(p)]
         if missing:
-            raise Fail(f'系统层 {version} 需要的软件包没装（{" ".join(missing)}），要重刷镜像才能用')
+            raise Fail('系统层 {version} 需要的软件包没装（{packages}），要重刷镜像才能用',
+                       version=version, packages=' '.join(missing))
         if shutil.disk_usage(OPT if OPT.exists() else STATE).free < s['file']['size'] * 4 + SPARE:
             raise Fail('存储空间不够，没有安装')
         before = health()
         need_hub = bool(before and before.get('hub'))
         need_audio = bool(before and before.get('audio'))
-        set_job(st, 'downloading', version, '正在下载', 0, component='system')
+        set_job(st, 'downloading', version, msg('正在下载'), 0, component='system')
         pkg = download(conf, m, s['file'], st, version, 0, s['file']['size'])
-        set_job(st, 'installing', version, '正在安装', component='system')
+        set_job(st, 'installing', version, msg('正在安装'), component='system')
         extract(pkg, tree, True)
         entries, _ = read_table(tree)
         if tree_id(tree, entries) != s['tree']:
@@ -944,12 +970,12 @@ def install_system(conf, version):
         backup = make_backup(dests)
     except Fail as e:
         shutil.rmtree(tree, ignore_errors=True)
-        set_job(st, 'failed', version, str(e), component='system')
+        set_job(st, 'failed', version, e.msg, component='system')
         return 1
     except Exception as e:  # noqa: BLE001 - anything else still has to reach the page
         log('system install failed:', repr(e))
         shutil.rmtree(tree, ignore_errors=True)
-        set_job(st, 'failed', version, f'安装出错：{e}', component='system')
+        set_job(st, 'failed', version, msg('安装出错：{error}', error=str(e)), component='system')
         return 1
 
     # from here on files change: a power cut or an error puts the backup back
@@ -961,17 +987,17 @@ def install_system(conf, version):
         log('system: changed, restarting:', ' '.join(actions) or 'nothing')
         pending['actions'] = actions
         write_durable(SYS_PENDING, json.dumps(pending))
-        set_job(st, 'testing', version, '正在重启相关服务并自检', component='system')
+        set_job(st, 'testing', version, msg('正在重启相关服务并自检'), component='system')
         take_effect(actions)
         ok, why = system_self_test(actions, need_hub, TEST_SECONDS, need_audio)
     except Fail as e:
-        ok, why = False, str(e)
+        ok, why = False, e.msg
     except Exception as e:  # noqa: BLE001
         log('system apply failed:', repr(e))
-        ok, why = False, f'安装出错：{e}'
+        ok, why = False, msg('安装出错：{error}', error=str(e))
     if not ok:
         log('system self-test failed:', why)
-        return system_rollback(st, pending, f'没装成功（{why}）', TEST_SECONDS)
+        return system_rollback(st, pending, msg('没装成功（{why}）', why=why), TEST_SECONDS)
     write_record(version, tree, entries)
     SYS_PENDING.unlink(missing_ok=True)
     os.sync()
@@ -980,10 +1006,11 @@ def install_system(conf, version):
     sysst = st.setdefault('system', {})
     sysst.update(current=version, available=None, reboot='boot' in actions)
     sysst.pop('failed', None)
-    msg = f'系统层已更新到 {version}'
     if 'boot' in actions:
-        msg += '，部分改动重启设备后生效'
-    set_job(st, 'done', version, msg, component='system')
+        done = msg('系统层已更新到 {version}，部分改动重启设备后生效', version=version)
+    else:
+        done = msg('系统层已更新到 {version}', version=version)
+    set_job(st, 'done', version, done, component='system')
     return 0
 
 
@@ -1045,12 +1072,13 @@ def check(conf):
         m = fetch_manifest(conf, st)
         note_available(st, m, st['current'])
         note_system(st, m)
-        st['check_error'] = None
+        st['check_error'] = st['check_error_msg'] = None
     except Fail as e:
-        st['check_error'] = str(e)
+        st['check_error'], st['check_error_msg'] = str(e), e.msg
     except Exception as e:  # noqa: BLE001
         log('check failed:', repr(e))
-        st['check_error'] = '检查更新出错'
+        st['check_error_msg'] = msg('检查更新出错')
+        st['check_error'] = msg_text(st['check_error_msg'])
     save_status(st)
     log('check:', st.get('available'), (st.get('system') or {}).get('available'), st.get('check_error'))
     return 0
@@ -1088,10 +1116,12 @@ def run(conf):
                 # both went in with one tap: say so in the one result the pages show (the client's
                 # own 已更新到 would hide the system layer's)
                 st = load_status()
-                msg = f'已更新到 系统层 {system_v} · 客户端 {client_v}'
                 if (st.get('system') or {}).get('reboot'):
-                    msg += '，部分改动重启设备后生效'
-                set_job(st, 'done', client_v, msg)
+                    done = msg('已更新到 系统层 {system} · 客户端 {client}，部分改动重启设备后生效',
+                               system=system_v, client=client_v)
+                else:
+                    done = msg('已更新到 系统层 {system} · 客户端 {client}', system=system_v, client=client_v)
+                set_job(st, 'done', client_v, done)
             return rc
         log('install request ignored:', body, avail, savail)
         return check(conf)
@@ -1122,14 +1152,15 @@ def recover(conf, seconds, why):
         sysst.update(current=spending['to'], available=None)
         sysst.pop('failed', None)
         if (st.get('job') or {}).get('state') in ACTIVE_JOBS:
-            set_job(st, 'done', spending['to'], f'系统层已更新到 {spending["to"]}', component='system')
+            set_job(st, 'done', spending['to'], msg('系统层已更新到 {version}', version=spending['to']),
+                    component='system')
         else:
             save_status(st)
         spending = None
     if spending:
         # half-applied files or an untested switch: the backup is what last worked
         log('recover: a system layer install was interrupted, putting the backup back')
-        system_rollback(st, spending, f'上次系统层更新被中断（{why}）', seconds)
+        system_rollback(st, spending, msg('上次系统层更新被中断（{why}）', why=why), seconds)
         return 0
     try:
         pending = json.loads(PENDING.read_text())
@@ -1138,18 +1169,18 @@ def recover(conf, seconds, why):
     if pending:
         if current_version() == pending['to']:
             log('recover: an update was interrupted during its self-test, testing again')
-            set_job(st, 'testing', pending['to'], '上次更新被中断，正在重新自检')
+            set_job(st, 'testing', pending['to'], msg('上次更新被中断，正在重新自检'))
             return finish(conf, st, pending, seconds)
         PENDING.unlink(missing_ok=True)
     job = st.get('job') or {}
     if job.get('state') in ACTIVE_JOBS:
-        set_job(st, 'failed', job.get('version'), f'上次更新被中断（{why}），没有改动',
+        set_job(st, 'failed', job.get('version'), msg('上次更新被中断（{why}），没有改动', why=why),
                 component=job.get('component', 'client'))
     return 0
 
 
 def boot(conf):
-    return recover(conf, BOOT_TEST_SECONDS, '断电或重启')
+    return recover(conf, BOOT_TEST_SECONDS, msg('断电或重启'))
 
 
 def adopt(src, version=None):
@@ -1205,7 +1236,7 @@ def main():
     with open(LOCK, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if cmd in ('check', 'run', 'install'):
-            recover(conf, TEST_SECONDS, '下载太慢超时或出错')
+            recover(conf, TEST_SECONDS, msg('下载太慢超时或出错'))
         if cmd == 'check':
             return check(conf)
         if cmd == 'run':
