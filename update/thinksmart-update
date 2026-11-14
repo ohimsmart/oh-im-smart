@@ -84,7 +84,7 @@ ENV_ID_RE = re.compile(r'[0-9a-f]{16}')                    # a directory name un
 
 ACTIVE_JOBS = ('preparing', 'downloading', 'installing', 'testing', 'rolling_back')
 
-UPDATER_VERSION = 2        # 1: client only (the 20261101 image); 2: also the system layer.
+UPDATER_VERSION = 3        # 1: client only (the 20261101 image); 2: also the system layer; 3: keyed messages and job.reboot (spec §6.1).
                            # The client's deploy/bootstrap-updater compares this.
 ROOT = Path('/')           # where table destinations are (tests point it elsewhere)
 SYSTEM = OPT / 'system'
@@ -172,11 +172,11 @@ def save_status(st):
     tmp.replace(STATUS)
 
 
-def set_job(st, state, version, message, progress=None, component='client'):
+def set_job(st, state, version, message, progress=None, component='client', reboot=False):
     """message: a msg(). The job keeps it as Chinese text in `message` (older pages show that) and as
-    msg_key/msg_params (the pages translate those)."""
+    msg_key/msg_params (the pages translate those); reboot: this update needs a restart to finish."""
     st['job'] = {'state': state, 'version': version, 'message': msg_text(message), **message,
-                 'progress': progress, 'time': int(time.time()), 'component': component}
+                 'progress': progress, 'time': int(time.time()), 'component': component, 'reboot': reboot}
     save_status(st)
     log(f'[{component} {state}] {version} {st["job"]["message"]}')
 
@@ -327,7 +327,7 @@ def download(conf, m, item, st, version, done_before, total):
                         shown = time.monotonic()
                         job = st.get('job') or {}
                         set_job(st, 'downloading', version, msg('正在下载'), (done_before + got) / total,
-                                job.get('component', 'client'))
+                                job.get('component', 'client'), job.get('reboot', False))
         # a connection cut half way raises http.client.IncompleteRead, not an OSError
         except (OSError, urllib.error.URLError, http.client.HTTPException) as e:
             last_error = e
@@ -442,11 +442,12 @@ def cleanup():
     shutil.rmtree(DOWNLOAD, ignore_errors=True)
 
 
-def install(conf, version):
+def install(conf, version, reboot=False):
+    """reboot: the system layer this same request installed first needs a restart (spec §6.1)."""
     st = load_status()
     cur = current_version()
     try:
-        set_job(st, 'preparing', version, msg('正在准备'))
+        set_job(st, 'preparing', version, msg('正在准备'), reboot=reboot)
         m = fetch_manifest(conf, st)       # again: something newer may have been published since
         if m['version'] != version:
             note_available(st, m, cur)
@@ -460,14 +461,14 @@ def install(conf, version):
         before = health()
         need_hub = bool(before and before.get('hub'))
 
-        set_job(st, 'downloading', version, msg('正在下载'), 0)
+        set_job(st, 'downloading', version, msg('正在下载'), 0, reboot=reboot)
         code = download(conf, m, files['code'], st, version, 0, total)
         env_id = files['env']['id']
         env_tgz = None
         if not env_present(env_id):
             env_tgz = download(conf, m, files['env'], st, version, files['code']['size'], total)
 
-        set_job(st, 'installing', version, msg('正在安装'))
+        set_job(st, 'installing', version, msg('正在安装'), reboot=reboot)
         new_dir = CLIENT / f'{version}.new'
         extract(code, new_dir, True)
         if env_tgz:
@@ -478,20 +479,21 @@ def install(conf, version):
             shutil.rmtree(CLIENT / version)
         os.replace(new_dir, CLIENT / version)
     except Fail as e:
-        set_job(st, 'failed', version, e.msg)
+        set_job(st, 'failed', version, e.msg, reboot=reboot)
         return 1
     except Exception as e:  # noqa: BLE001 - anything else still has to reach the page
         log('install failed:', repr(e))
-        set_job(st, 'failed', version, msg('安装出错：{error}', error=str(e)))
+        set_job(st, 'failed', version, msg('安装出错：{error}', error=str(e)), reboot=reboot)
         return 1
 
-    pending = {'from': cur, 'to': version, 'previous': previous_version(), 'need_hub': need_hub}
+    pending = {'from': cur, 'to': version, 'previous': previous_version(), 'need_hub': need_hub,
+               'reboot': reboot}
     # durable, and with it the unpacked version: else a power cut right after the switch can leave
     # current pointing at empty files and no record that it still needs its self-test
     write_durable(PENDING, json.dumps(pending))
     set_link('previous', cur)
     set_link('current', version)
-    set_job(st, 'testing', version, msg('正在重启并自检'))
+    set_job(st, 'testing', version, msg('正在重启并自检'), reboot=reboot)
     restart_client(version)
     return finish(conf, st, pending, TEST_SECONDS)
 
@@ -499,20 +501,21 @@ def install(conf, version):
 def finish(conf, st, pending, seconds):
     """Self-test the switched-to version; keep it or switch back."""
     version, old = pending['to'], pending['from']
+    reboot = pending.get('reboot', False)       # an older updater's record has none
     ok, why = self_test(version, pending['need_hub'], seconds)
     if ok:
         PENDING.unlink(missing_ok=True)
         st['current'] = version
         st['available'] = None
         st.pop('failed', None)
-        set_job(st, 'done', version, msg('已更新到 {version}', version=version))
+        set_job(st, 'done', version, msg('已更新到 {version}', version=version), reboot=reboot)
         cleanup()
         return 0
     log('self-test failed:', why)
     if not old:
-        set_job(st, 'failed', version, msg('{why}，也没有可以退回的版本', why=why))
+        set_job(st, 'failed', version, msg('{why}，也没有可以退回的版本', why=why), reboot=reboot)
         return 1
-    set_job(st, 'rolling_back', version, msg('{why}，正在退回 {old}', why=why, old=old))
+    set_job(st, 'rolling_back', version, msg('{why}，正在退回 {old}', why=why, old=old), reboot=reboot)
     set_link('current', old)
     set_link('previous', pending.get('previous'))
     restart_client(old)
@@ -527,7 +530,7 @@ def finish(conf, st, pending, seconds):
     else:
         done = msg('{version} 自检没通过（{why}），已退回 {old}，但退回后客户端也没正常启动，请重启设备',
                    version=version, why=why, old=old)
-    set_job(st, 'rolled_back', version, done)
+    set_job(st, 'rolled_back', version, done, reboot=reboot)
     return 1
 
 
@@ -999,18 +1002,22 @@ def install_system(conf, version):
         log('system self-test failed:', why)
         return system_rollback(st, pending, msg('没装成功（{why}）', why=why), TEST_SECONDS)
     write_record(version, tree, entries)
+    reboot = 'boot' in actions
+    sysst = st.setdefault('system', {})
+    sysst.update(current=version, available=None, reboot=reboot)
+    sysst.pop('failed', None)
+    if reboot:
+        done = msg('系统层已更新到 {version}，部分改动重启设备后生效', version=version)
+    else:
+        done = msg('系统层已更新到 {version}', version=version)
+    # the finished job (and its reboot) on disk before the pending record goes: in between, a power
+    # cut would otherwise leave a testing job that recovery marks as failed (spec §6.1)
+    set_job(st, 'done', version, done, component='system', reboot=reboot)
+    os.sync()
     SYS_PENDING.unlink(missing_ok=True)
     os.sync()
     shutil.rmtree(tree, ignore_errors=True)
     shutil.rmtree(DOWNLOAD, ignore_errors=True)
-    sysst = st.setdefault('system', {})
-    sysst.update(current=version, available=None, reboot='boot' in actions)
-    sysst.pop('failed', None)
-    if 'boot' in actions:
-        done = msg('系统层已更新到 {version}，部分改动重启设备后生效', version=version)
-    else:
-        done = msg('系统层已更新到 {version}', version=version)
-    set_job(st, 'done', version, done, component='system')
     return 0
 
 
@@ -1107,21 +1114,24 @@ def run(conf):
         system_v = (savail.get('version') if savail.get('version') == str(body.get('system', ''))
                     and not savail.get('missing') else None)
         if client_v or system_v:
+            reboot = False
             if system_v:
                 rc = install_system(conf, system_v)
                 if rc or not client_v:
                     return rc          # a failed system layer stops here: the client waits
-            rc = install(conf, client_v)
+                # install_system just wrote it for this run; an older run's value never reaches here
+                reboot = bool((load_status().get('system') or {}).get('reboot'))
+            rc = install(conf, client_v, reboot)
             if rc == 0 and system_v:
                 # both went in with one tap: say so in the one result the pages show (the client's
                 # own 已更新到 would hide the system layer's)
                 st = load_status()
-                if (st.get('system') or {}).get('reboot'):
+                if reboot:
                     done = msg('已更新到 系统层 {system} · 客户端 {client}，部分改动重启设备后生效',
                                system=system_v, client=client_v)
                 else:
                     done = msg('已更新到 系统层 {system} · 客户端 {client}', system=system_v, client=client_v)
-                set_job(st, 'done', client_v, done)
+                set_job(st, 'done', client_v, done, reboot=reboot)
             return rc
         log('install request ignored:', body, avail, savail)
         return check(conf)
@@ -1146,16 +1156,20 @@ def recover(conf, seconds, why):
         # it passed its self-test and was recorded; only dropping the pending record didn't reach
         # the disk. Rolling back now would run the old files under the new version's record.
         log('recover: system layer', spending['to'], 'was already installed, keeping it')
-        SYS_PENDING.unlink(missing_ok=True)
-        os.sync()
+        reboot = 'boot' in (spending.get('actions') or [])
         sysst = st.setdefault('system', {})
-        sysst.update(current=spending['to'], available=None)
+        sysst.update(current=spending['to'], available=None, reboot=reboot)
         sysst.pop('failed', None)
-        if (st.get('job') or {}).get('state') in ACTIVE_JOBS:
+        job = st.get('job') or {}
+        # no job at all: the status file was lost or unreadable, and the pages need the result too
+        if not job or job.get('state') in ACTIVE_JOBS:
             set_job(st, 'done', spending['to'], msg('系统层已更新到 {version}', version=spending['to']),
-                    component='system')
+                    component='system', reboot=reboot)
         else:
             save_status(st)
+        os.sync()           # status first, then the pending record (as install_system does)
+        SYS_PENDING.unlink(missing_ok=True)
+        os.sync()
         spending = None
     if spending:
         # half-applied files or an untested switch: the backup is what last worked
@@ -1169,13 +1183,14 @@ def recover(conf, seconds, why):
     if pending:
         if current_version() == pending['to']:
             log('recover: an update was interrupted during its self-test, testing again')
-            set_job(st, 'testing', pending['to'], msg('上次更新被中断，正在重新自检'))
+            set_job(st, 'testing', pending['to'], msg('上次更新被中断，正在重新自检'),
+                    reboot=pending.get('reboot', False))
             return finish(conf, st, pending, seconds)
         PENDING.unlink(missing_ok=True)
     job = st.get('job') or {}
     if job.get('state') in ACTIVE_JOBS:
         set_job(st, 'failed', job.get('version'), msg('上次更新被中断（{why}），没有改动', why=why),
-                component=job.get('component', 'client'))
+                component=job.get('component', 'client'), reboot=job.get('reboot', False))
     return 0
 
 

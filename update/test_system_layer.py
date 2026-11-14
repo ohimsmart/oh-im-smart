@@ -208,6 +208,7 @@ def test_install_system_layer(sysu, release, tmp_path):
     st = sysu.load_status()
     assert st['job'] == {**st['job'], 'state': 'done', 'component': 'system', 'version': '0.2.0'}
     assert st['system']['current'] == '0.2.0' and st['system']['available'] is None
+    assert st['job']['reboot'] is False and st['system']['reboot'] is False     # nothing read only at boot
     assert sysu.target('/usr/local/bin/thinksmart-kiosk.py').read_bytes() == b'kiosk v2\n'
     assert sysu.target('/etc/thinksmart-kiosk.conf').read_bytes() == b'URL=mine\n'      # kept
     # only what changed restarts: the screen, the new user unit, bluetooth (its conf was edited)
@@ -299,7 +300,7 @@ def test_one_request_system_first_then_client(sysu, release, monkeypatch):
     sysu.run_main('check')
     order = []
     sysu.install_system = lambda conf, v: order.append(('system', v)) or 0
-    sysu.install = lambda conf, v: order.append(('client', v)) or 0
+    sysu.install = lambda conf, v, reboot=False: order.append(('client', v)) or 0
     (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '1.2.0', 'system': '0.2.0'}))
     sysu.run_main('run')
     assert order == [('system', '0.2.0'), ('client', '1.2.0')]
@@ -333,7 +334,7 @@ def test_selftest_does_not_wait_for_the_lock(sysu):
     with open(sysu.LOCK, 'w') as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         r = subprocess.run([sys.executable, str(SCRIPT), 'selftest'], capture_output=True, text=True, timeout=10)
-    assert r.returncode == 0 and 'thinksmart-update 2' in r.stdout
+    assert r.returncode == 0 and 'thinksmart-update 3' in r.stdout
 
 
 def test_make_release_carries_the_system_layer(tmp_path):
@@ -518,7 +519,7 @@ def test_one_tap_for_both_reports_both(sysu, release):
     sysu.install_system = lambda conf, v: (sysu.set_job(sysu.load_status(), 'done', v,
                                                         sysu.msg('系统层已更新到 {version}', version=v),
                                                         component='system'), 0)[1]
-    sysu.install = lambda conf, v: (sysu.set_job(sysu.load_status(), 'done', v,
+    sysu.install = lambda conf, v, reboot=False: (sysu.set_job(sysu.load_status(), 'done', v,
                                                  sysu.msg('已更新到 {version}', version=v)), 0)[1]
     (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '1.2.0', 'system': '0.2.0'}))
     assert sysu.run_main('run') == 0
@@ -527,3 +528,88 @@ def test_one_tap_for_both_reports_both(sysu, release):
     (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '1.2.0'}))
     sysu.run_main('run')
     assert sysu.load_status()['job']['message'] == '已更新到 1.2.0'
+
+
+# ---- job.reboot (spec §6.1): only for this run's system layer, and kept through power cuts ----
+
+BOOT_LINE = 'kiosk/welcome.html /etc/thinksmart-boot-test.conf 644 root boot\n'   # read only at boot
+
+
+def test_a_system_layer_read_at_boot_says_restart(sysu, release):
+    """Only the system layer, and it changed a file read only at boot."""
+    old_device(sysu)
+    release(tree_kw={'extra': BOOT_LINE})
+    sysu.run_main('check')
+    (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '', 'system': '0.2.0'}))
+    assert sysu.run_main('run') == 0
+    st = sysu.load_status()
+    assert st['job']['state'] == 'done' and st['job']['reboot'] is True and st['system']['reboot'] is True
+    assert st['job']['message'] == '系统层已更新到 0.2.0，部分改动重启设备后生效'
+
+
+def test_one_tap_carries_this_runs_reboot_to_the_client(sysu, release):
+    """Both with one tap: the client's job (the one the pages show) carries the system layer's
+    reboot; a later client-only update doesn't, though system.reboot stays in the status file."""
+    release(client='1.2.0')
+    sysu.run_main('check')
+
+    def install_system(conf, v):
+        st = sysu.load_status()
+        st.setdefault('system', {})['reboot'] = True
+        sysu.save_status(st)
+        return 0
+    seen = []
+    sysu.install_system = install_system
+    sysu.install = lambda conf, v, reboot=False: seen.append(reboot) or 0
+    (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '1.2.0', 'system': '0.2.0'}))
+    assert sysu.run_main('run') == 0
+    job = sysu.load_status()['job']
+    assert seen == [True] and job['reboot'] is True
+    assert job['message'] == '已更新到 系统层 0.2.0 · 客户端 1.2.0，部分改动重启设备后生效'
+    (sysu.REQUESTS / 'install').write_text(json.dumps({'action': 'install', 'version': '1.2.0'}))
+    sysu.run_main('run')
+    assert seen == [True, False]
+
+
+def power_cut_before_dropping_pending(sysu, monkeypatch):
+    real_unlink = Path.unlink
+
+    def unlink(self, *a, **k):
+        if self == sysu.SYS_PENDING:
+            raise KeyboardInterrupt          # dies right here
+        return real_unlink(self, *a, **k)
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    with pytest.raises(KeyboardInterrupt):
+        sysu.install_system(sysu.read_conf(), '0.2.0')
+    monkeypatch.setattr(Path, 'unlink', real_unlink)
+
+
+def test_power_cut_after_a_passed_install_keeps_its_reboot(sysu, release, monkeypatch):
+    """Recorded, then the power went before the pending record was dropped: the finished job and its
+    reboot are in the status file first, and boot works them out again from the pending record."""
+    old_device(sysu)
+    release(tree_kw={'extra': BOOT_LINE})
+    sysu.run_main('check')
+    power_cut_before_dropping_pending(sysu, monkeypatch)
+    st = sysu.load_status()
+    assert st['job']['state'] == 'done' and st['job']['reboot'] is True and st['system']['reboot'] is True
+    # as if that write hadn't reached the disk: the job still testing, no reboot anywhere
+    st['job'].update(state='testing', reboot=False)
+    del st['system']['reboot']
+    sysu.save_status(st)
+    sysu.run_main('boot')
+    st = sysu.load_status()
+    assert st['job']['state'] == 'done' and st['job']['reboot'] is True and st['system']['reboot'] is True
+    assert st['job']['message'] == '系统层已更新到 0.2.0'          # what recovery always said
+    assert not sysu.SYS_PENDING.exists()
+
+
+def test_a_lost_status_file_still_gets_the_finished_job(sysu, release, monkeypatch):
+    old_device(sysu)
+    release(tree_kw={'extra': BOOT_LINE})
+    sysu.run_main('check')
+    power_cut_before_dropping_pending(sysu, monkeypatch)
+    sysu.STATUS.unlink()
+    sysu.run_main('boot')
+    job = sysu.load_status()['job']
+    assert job['state'] == 'done' and job['component'] == 'system' and job['reboot'] is True

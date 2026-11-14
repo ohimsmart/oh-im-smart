@@ -88,6 +88,7 @@ def test_killed_during_self_test_tests_again_and_keeps_it(tu):
     tu.run_main('check')
     st = tu.load_status()
     assert st['job']['state'] == 'done' and st['current'] == '1.2.0'
+    assert st['job']['reboot'] is False                  # an older updater's record has no reboot
     assert seconds == [tu.TEST_SECONDS]
     assert not tu.PENDING.exists()
 
@@ -241,6 +242,7 @@ def test_install_from_a_test_source(tu, source):
     tu.run_main('check')
     assert tu.run_main('install', '1.2.0') == 0
     assert tu.load_status()['job']['state'] == 'done'
+    assert tu.load_status()['job']['reboot'] is False
     assert tu.current_version() == '1.2.0' and tu.previous_version() == '1.1.0'
     assert (tu.CLIENT / '1.2.0' / 'thinksmart_client' / '__init__.py').exists()
 
@@ -272,3 +274,40 @@ def test_a_cut_download_fails_cleanly_in_chinese(tu, source, monkeypatch):
     msg = tu.load_status()['job']['message']
     assert msg.startswith('下载失败') and 'IncompleteRead' not in msg and 'bytes' not in msg
     assert tu.current_version() == '1.1.0'
+
+
+def test_an_interrupted_self_test_keeps_the_reboot_it_was_given(tu):
+    install_dirs(tu, '1.1.0', '1.2.0')
+    tu.set_link('previous', '1.1.0')
+    tu.set_link('current', '1.2.0')
+    tu.PENDING.write_text(json.dumps({'from': '1.1.0', 'to': '1.2.0', 'previous': None,
+                                      'need_hub': False, 'reboot': True}))
+    job_left(tu, 'testing')
+    tu.run_main('boot')
+    job = tu.load_status()['job']
+    assert job['state'] == 'done' and job['reboot'] is True
+
+
+def test_the_client_job_after_a_restart_needing_system_layer_keeps_reboot(tu, source):
+    """System layer then client with one tap: whatever happens to the client, its job still says the
+    restart is needed (spec §6.1: system layer done, client failed or went back)."""
+    tu.run_main('check')
+    good = source['code'].read_bytes()
+    source['code'].write_bytes(good[:-1] + bytes([good[-1] ^ 1]))
+    assert tu.install(tu.read_conf(), '1.2.0', True) == 1
+    job = tu.load_status()['job']
+    assert job['state'] == 'failed' and job['reboot'] is True
+    source['code'].write_bytes(good)
+    tu.self_test = lambda version, need_hub, s: (version == '1.1.0', tu.msg('新版本没有启动起来'))
+    assert tu.install(tu.read_conf(), '1.2.0', True) == 1
+    job = tu.load_status()['job']
+    assert job['state'] == 'rolled_back' and job['reboot'] is True
+    # the rollback's cleanup dropped the environment the fixture had put on the device
+    env = tu.ENVS / source['manifest']['files']['env']['id']
+    if not env.exists():
+        (env / 'bin').mkdir(parents=True)
+        (env / 'bin' / 'python').symlink_to(sys.executable)
+    tu.self_test = lambda version, need_hub, s: (True, '')
+    assert tu.install(tu.read_conf(), '1.2.0', True) == 0
+    job = tu.load_status()['job']
+    assert job['state'] == 'done' and job['reboot'] is True
