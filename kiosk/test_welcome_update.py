@@ -5,21 +5,18 @@ says it in its message (spec §6.1). Needs node.
 """
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
+from welcome_js import NODE, page_lines, run
+
 WELCOME = Path(__file__).with_name('welcome.html')
-NODE = shutil.which('node') or 'node'
+HELPERS = page_lines('needsReboot', 'updMsg', 'updFail')
 
 
-def run_helpers(expr):
-    """Evaluate expr (JSON out) next to the page's needsReboot and updFail."""
-    page = WELCOME.read_text(encoding='utf-8')
-    lines = [re.search(rf'^const {name} = .*$', page, re.M) for name in ('needsReboot', 'updFail')]
-    assert all(lines), 'needsReboot or updFail not found in welcome.html'
-    code = '\n'.join(m[0] for m in lines) + f'\nprocess.stdout.write(JSON.stringify({expr}))'
-    return json.loads(subprocess.run([NODE, '-e', code], capture_output=True, text=True, check=True).stdout)
+def run_helpers(expr, lang='zh-Hans'):
+    """Evaluate expr (JSON out) next to the page's needsReboot, updMsg and updFail."""
+    return run(expr, lang, HELPERS)
 
 
 def test_needs_reboot_reads_the_flag_first():
@@ -51,3 +48,17 @@ def test_the_page_script_still_parses(tmp_path):
         f.write_text(js, encoding='utf-8')
         r = subprocess.run([NODE, '--check', str(f)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
+
+
+def test_the_english_page_translates_the_updaters_message():
+    why = {'msg_key': '屏幕界面没有启动起来', 'msg_params': {}}
+    jobs = [{'state': 'failed', 'message': '连不上更新服务器', 'msg_key': '连不上更新服务器', 'msg_params': {},
+             'reboot': True},
+            {'state': 'failed', 'message': '1.0.2 自检没通过（屏幕界面没有启动起来），已退回 1.0.1',
+             'msg_key': '{version} 自检没通过（{why}），已退回 {old}',
+             'msg_params': {'version': '1.0.2', 'why': why, 'old': '1.0.1'}, 'reboot': False},
+            {'state': 'failed', 'message': '下载太慢'}]      # an older updater: no key, its Chinese as it is
+    assert run_helpers(f'{json.dumps(jobs, ensure_ascii=False)}.map(updFail)', 'en') == [
+        'Can’t reach the update server. Some system layer changes take effect after a restart',
+        '1.0.2 failed its self-test (the screen interface did not start); went back to 1.0.1',
+        '下载太慢']

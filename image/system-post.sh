@@ -22,7 +22,7 @@ systemctl reenable thinksmart-ssh-hostkeys.service
 # pipewire-pulse restarts; an existing install only has the default.target link
 user_systemctl daemon-reload
 user_systemctl reenable thinksmart-mic.service idle-blanker.service
-# Only welcome.html, keyboard.js and qrcode.js are used here; the rest is from the first chat
+# Only welcome.html, keyboard.js, qrcode.js, i18n.js, zh-Hant.js and en.js are used here; the rest is from the first chat
 # page and py-xiaozhi (vendor logos, an Edge TTS sample)
 rm -rf /usr/local/share/thinksmart-kiosk/chat.html /usr/local/share/thinksmart-kiosk/logos \
     /usr/local/share/thinksmart-kiosk/wake.wav

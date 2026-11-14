@@ -14,6 +14,11 @@ Every page gets the on-screen keyboard (keyboard.js, injected): it slides up whe
 has focus, so pages only use plain <input>s. The welcome page and the configured page, when that is
 served by this device itself (127.0.0.1/localhost: the voice client's settings), may ask us to scan
 for and join Wi-Fi networks through window.webkit.messageHandlers.thinksmart.
+
+The welcome page asks for the screen's language first (繁體中文 / 简体中文 / English) and stays until
+one is chosen; the choice is kept in ~/.config/thinksmart-kiosk/lang, set through the same handler
+(set_language, also from the voice client's settings), and the voice client on this device is loaded
+with ?lang=<it> (spec §6.2).
 """
 import json
 import os
@@ -38,6 +43,10 @@ SHARE = '/usr/local/share/thinksmart-kiosk'
 WELCOME = SHARE + '/welcome.html'
 KEYBOARD = SHARE + '/keyboard.js'
 RETRY_SECONDS = 5
+LANG_FILE = os.path.expanduser('~/.config/thinksmart-kiosk/lang')   # the kiosk runs as ubuntu (spec §6.2)
+LANG_LOCK = threading.Lock()   # every command runs in its own thread: a second tap may overlap the first save
+LOCALES = ('zh-Hant', 'zh-Hans', 'en')
+CLIENT_PORT = 8090
 
 
 def read_conf():
@@ -291,6 +300,31 @@ def update_request(msg, _progress):
         return {'ok': False}
 
 
+def read_lang():
+    """The language chosen on this device; '' while there is none (or the file holds something else)."""
+    try:
+        with open(LANG_FILE, encoding='utf-8') as f:
+            lang = f.read().strip()
+    except (OSError, ValueError):   # ValueError: bytes that aren't text (UnicodeDecodeError)
+        return ''
+    return lang if lang in LOCALES else ''
+
+
+def set_language(msg, _progress):
+    """The welcome page's or the voice client's language choice, kept for every page (spec §6.2).
+    A write that fails raises: run_command answers {ok: false, reason: failed} and the page says so."""
+    lang = msg.get('lang')
+    if lang not in LOCALES:
+        return {'ok': False, 'reason': 'invalid'}
+    with LANG_LOCK:
+        os.makedirs(os.path.dirname(LANG_FILE), exist_ok=True)
+        tmp = LANG_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(lang + '\n')
+        os.replace(tmp, LANG_FILE)
+    return {'ok': True}
+
+
 def run_command(handler, msg, progress):
     """A page's command, always with an answer: a page waiting on one that never comes stays busy
     (the Wi-Fi panel can't be closed). nmcli hanging past its timeout, NetworkManager restarting,
@@ -307,21 +341,36 @@ def run_command(handler, msg, progress):
 
 LOOPBACK = ('127.0.0.1', 'localhost', '::1')
 WIFI_COMMANDS = {'wifi_status': wifi_status, 'scan': wifi_scan, 'connect': wifi_connect, 'forget': wifi_forget}
-WELCOME_COMMANDS = dict(WIFI_COMMANDS, update_status=update_status, update_install=update_request,
+CLIENT_COMMANDS = dict(WIFI_COMMANDS, set_language=set_language)
+WELCOME_COMMANDS = dict(CLIENT_COMMANDS, update_status=update_status, update_install=update_request,
                         update_check=update_request)
 
 
 def page_commands(uri, url):
     """What the page now on screen may ask for: the welcome page everything, the configured page
-    only Wi-Fi and only when this device serves it (the voice client's settings), others nothing.
-    A page on the network can't take over the device's Wi-Fi, nor can one the user navigates to."""
+    only Wi-Fi and the language, and only when this device serves it (the voice client's settings),
+    others nothing. A page on the network can't take over the device's Wi-Fi, nor can one the user
+    navigates to."""
     if uri.startswith('file://' + WELCOME):
         return WELCOME_COMMANDS
-    page, conf = urllib.parse.urlparse(uri), urllib.parse.urlparse(url or '')
-    if (page.scheme in ('http', 'https') and (page.scheme, page.netloc) == (conf.scheme, conf.netloc)
-            and page.hostname in LOOPBACK):
-        return WIFI_COMMANDS
-    return {}
+    try:
+        page, conf = urllib.parse.urlparse(uri), urllib.parse.urlparse(url or '')
+        local = (page.scheme in ('http', 'https') and (page.scheme, page.netloc) == (conf.scheme, conf.netloc)
+                 and page.hostname in LOOPBACK)
+    except ValueError:   # an address that doesn't parse (http://[::1:8090/): nothing
+        return {}
+    return CLIENT_COMMANDS if local else {}
+
+
+def shell_script(url):
+    """window.thinksmartShell, injected into every page: what the shell offers. The language only on
+    the configured page's own origin when that is this device: the shell answers no other page, and a
+    voice client elsewhere would wait 90 s for a reply that never comes instead of using its own setting."""
+    language = 'false'
+    if 'set_language' in page_commands(url, url):
+        u = urllib.parse.urlsplit(url)
+        language = 'location.protocol + "//" + location.host === %s' % json.dumps(f'{u.scheme}://{u.netloc}')
+    return 'window.thinksmartShell = {version: 3, keyboard: true, wifi: true, language: %s};' % language
 
 
 def reachable(url):
@@ -337,6 +386,26 @@ def reachable(url):
         return True
     except (OSError, ValueError):
         return False
+
+
+def client_url(url, lang):
+    """The URL to load: the voice client on this device (http, 127.0.0.1/localhost, port 8090, any
+    path) gets ?lang=<lang>, replacing one already there; any other URL is the user's own and stays."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        ours = u.scheme == 'http' and u.hostname in LOOPBACK and u.port == CLIENT_PORT
+    except ValueError:   # a port that isn't a number, a broken IPv6 address
+        return url
+    if not lang or not ours:
+        return url
+    query = [(k, v) for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True) if k != 'lang']
+    return urllib.parse.urlunsplit(u._replace(query=urllib.parse.urlencode(query + [('lang', lang)])))
+
+
+def leave_welcome(url, check=reachable):
+    """The welcome page gives way once a language is chosen, something answers at url (check) and
+    the device has been on a network (spec §6.2)."""
+    return bool(url) and bool(read_lang()) and check(url) and not needs_network_setup()
 
 
 def main():
@@ -363,7 +432,7 @@ def main():
     ucm = WebKit2.UserContentManager()
     ucm.register_script_message_handler('thinksmart')
     # The system keyboard, on every page (top frame); thinksmartShell tells pages what we offer
-    shell = 'window.thinksmartShell = {version: 2, keyboard: true, wifi: true};'
+    shell = shell_script(url)
     try:
         with open(KEYBOARD) as f:
             shell += '\n' + f.read()
@@ -430,14 +499,17 @@ def main():
         def work():
             r = run_command(handler, msg, progress)
             r['id'] = msg.get('id')
-            # the address and Wi-Fi name may have just changed (not after the update polls: every 3 s)
-            st = None if str(msg.get('cmd', '')).startswith('update_') else page_status()
+            # the address and Wi-Fi name may have just changed (not after the update polls: every 3 s);
+            # only the welcome page gets it, so the client's page isn't kept waiting for ip and nmcli
+            st = (page_status() if commands is WELCOME_COMMANDS and not str(msg.get('cmd', '')).startswith('update_')
+                  else None)
 
             def done():
                 if view.get_uri() != uri:  # the page changed meanwhile: the answer isn't for this one
                     return False
                 run_js('thinksmartReply', r)
-                if st and commands is WELCOME_COMMANDS:
+                if st:
+                    st['lang'] = read_lang()   # as it is now: another command may have saved one meanwhile
                     run_js('thinksmartStatus', st)
                 return False
             GLib.idle_add(done)
@@ -447,11 +519,12 @@ def main():
 
     def page_status():
         st = device_status()
-        st.update(target=url, tries=state['tries'], help=conf.get('HELP_URL', ''))
+        st.update(target=url, tries=state['tries'], help=conf.get('HELP_URL', ''), lang=read_lang())
         return st
 
     def show_welcome():
         state['welcome'] = True
+        state['busy'] = False   # a fresh page has no sheet or picker open (it says so again if it opens one)
         view.load_uri('file://' + WELCOME + '?' + urllib.parse.urlencode(page_status()))
 
     def on_load_failed(_view, _event, failing_uri, error):
@@ -468,7 +541,7 @@ def main():
             state['checking'] = True
 
             def work():
-                ok = reachable(url) and not needs_network_setup()
+                ok = leave_welcome(url)
                 st = None if ok else page_status()
 
                 def done():
@@ -477,10 +550,11 @@ def main():
                         return False
                     if ok and not state['busy']:
                         state['welcome'] = False
-                        view.load_uri(url)
+                        view.load_uri(client_url(url, read_lang()))
                     elif not ok:
                         state['tries'] += 1
                         st['tries'] = state['tries']
+                        st['lang'] = read_lang()   # as it is now: a choice may have been saved meanwhile
                         run_js('thinksmartStatus', st)
                     return False
                 GLib.idle_add(done)
@@ -488,8 +562,9 @@ def main():
         return True
 
     def reload():
-        if url and not needs_network_setup():
-            view.load_uri(url)
+        if leave_welcome(url, check=lambda _url: True):   # not reachable: load-failed shows the welcome page
+            state['welcome'] = False
+            view.load_uri(client_url(url, read_lang()))
         else:
             show_welcome()
         return False
