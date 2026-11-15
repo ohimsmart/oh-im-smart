@@ -1,0 +1,3 @@
+# The build needs only the script; never send images kept in bootstrap/ to the Docker daemon.
+*
+!prepare-image.sh
