@@ -69,7 +69,8 @@ if [ -t 0 ]; then TTY=-t; TTYSAVE=$(stty -g); fi
 # --cidfile and --label: the container is asked about and removed by its id and this run's label,
 # never by its name, which a container left behind by an earlier run with the same process id
 # could hold.
-docker run -i $TTY --init --name "$NAME" --label "ohimsmart.run=$RUN" --cidfile "$WORK/cid" \
+# DOCKER_CLI_HINTS=false: Docker Desktop's client otherwise follows a failed run with an advert.
+DOCKER_CLI_HINTS=false docker run -i $TTY --init --name "$NAME" --label "ohimsmart.run=$RUN" --cidfile "$WORK/cid" \
     --network none --read-only --tmpfs /tmp --log-driver none --user "$(id -u):$(id -g)" \
     --mount "type=bind,\"source=$WORK\",target=/work" "$IMAGE" /work/bootstrap.img <&0 &
 CLIENT=$!
