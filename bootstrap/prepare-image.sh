@@ -28,7 +28,8 @@ table=$(sfdisk -d "$IMG" 2>/dev/null) || die "no partition table in $IMG: is thi
 sector=$(sed -n 's/^sector-size: *\([0-9]*\)$/\1/p' <<<"$table")
 for start in $(sed -n 's/.*start= *\([0-9]*\),.*/\1/p' <<<"$table"); do
     dev="$IMG?offset=$((start * ${sector:-512}))"
-    head=$(dumpe2fs -h "$dev" 2>/dev/null) || continue
+    # tune2fs -l, not dumpe2fs -h: Alpine's dumpe2fs (in the Docker image) takes "-h" for the device.
+    head=$(tune2fs -l "$dev" 2>/dev/null) || continue
     grep -q '^Filesystem volume name: *pmOS_root$' <<<"$head" || continue
     [ -z "$FS" ] || die "more than one pmOS_root partition"
     grep -q '^Filesystem features:.* extent' <<<"$head" || die "pmOS_root is not ext4"
