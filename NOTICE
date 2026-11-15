@@ -1,0 +1,11 @@
+Oh I'm Smart (https://github.com/ohimsmart/oh-im-smart)
+
+This repository starts from the history of thinksmart-ubuntu-image by 半格 / HalfBit
+(https://github.com/justhalfbit/thinksmart-ubuntu-image), released under the MIT License;
+the copyright notice is kept in LICENSE.
+
+The image built here also carries the Oh I'm Smart client
+(https://github.com/ohimsmart/oh-im-smart-client) and gateway
+(https://github.com/ohimsmart/oh-im-smart-gateway); each repository has its own NOTICE.
+
+Changes in this repository are released under the same MIT License.
