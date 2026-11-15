@@ -727,7 +727,15 @@ Expected: 7 passed、1 skipped（洩漏測試：沒有 trace，Mac 那一側由�
 
 **故意破壞（在 scratchpad 的副本上，每一項都看到對應的測試失敗）：** 計劃列的 10 項，加上：`inspect` 改回同步執行（`hung` 的 `inspect` 參數失敗）、清理時另外以名稱刪容器（同名舊容器的測試失敗）。
 
-**Task 2（macOS）：未做，等維護者。** Mac 上沒有 Docker 引擎（見「需要維護者決定的事」）；而且 Mac 在這次工作中途開始對 SSH 沒有回應（`Connection timed out during banner exchange`）。
+**Task 2（macOS）：完成**（2026-11-16）。維護者安裝了 Docker Desktop（4.99，引擎 29.9.3 linux/arm64）。我經 `ssh mac` 啟動它，跑完後關掉。全部用 `/bin/bash` 3.2.57，`prepare.sh` 等四個檔案是 `0a7a9d6` 的版本：
+- 從檔案讀答案：WiFi `wifi=0`（約 8 秒，包括第一次以 BuildKit 建構映像）、只用 USB `usb=0`、空白密碼 `empty=1`（"needs 8 or more characters"）、`thinksmart` `default=1`（"published default"）。兩個輸出檔都是 `600`，`out/` 只有 `usb.img` 和 `wifi.img`，沒有容器。
+- `bash -x` 的記錄：四種寫法的測試密碼（原樣、`\` 寫成 `\\`、寫成 `\\\\`）都是 0 次（正向對照：同一組字串在答案檔裏找到 3 次）；`docker run` 帶 `--network none`、`--read-only`、`--log-driver none`、`--user 501:20`。
+- 中斷：容器跑起來後 `kill -TERM` `prepare.sh`，結束碼 130，`out/` 沒有多出檔案，沒有容器。
+- 終端機那條路（`mac_tty.py` 經 `ssh -tt`）：正常回答 `status=0`，WiFi 名稱回顯、兩個密碼沒有，終端機的 echo 已還原；Ctrl-P Ctrl-Q 印出 "detached from the container…"、Ctrl-C 印出 "stopped"，都是 `status=1`、沒有留下檔案、終端機已還原。
+- 帶回 UM：`OHIMSMART_PREPARED_IMAGE=wifi.img … -k given` 7 passed、1 skipped（洩漏測試，由上面的 `bash -x` 檢查覆蓋）。`usb.img`：沒有 `.nmconnection`，machine-id 是 32 位十六進位，`root` 是 `!`，沒有主機金鑰，`e2fsck -fn` 乾淨。
+- Mac 上的暫存目錄和 UM 上的副本都已刪除。
+
+Mac 上發現一個小問題：Ctrl-C 之後 Docker Desktop 的用戶端印出一段廣告（"What's next: Debug this container error with Gordon…"）。之後的 commit 以 `DOCKER_CLI_HINTS=false docker run …` 關掉（只設在 `docker` 用戶端的環境，不傳進容器）。
 
 **Task 3：** merge 和 push 不等 Task 2。
 
