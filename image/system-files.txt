@@ -46,6 +46,7 @@ screen/idle-blanker.service         /home/ubuntu/.config/systemd/user/idle-blank
 screen/screen-wake-daemon.py        /usr/local/bin/screen-wake-daemon.py            755 root system:screen-wake.service
 screen/screen-wake.service          /etc/systemd/system/screen-wake.service         644 root system:screen-wake.service
 screen/vcnl4200-proximity-daemon.py /usr/local/bin/vcnl4200-proximity-daemon.py     755 root user:vcnl4200-proximity-daemon.service
+screen/vcnl4200-proximity-daemon.service /home/ubuntu/.config/systemd/user/vcnl4200-proximity-daemon.service 644 ubuntu user:vcnl4200-proximity-daemon.service
 
 # audio: microphone service, ALSA, PipeWire, WirePlumber (user and system copies kept equal)
 xiaozhi/thinksmart-mic              /usr/local/bin/thinksmart-mic                   755 root mic
