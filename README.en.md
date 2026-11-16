@@ -1,18 +1,20 @@
-# ThinkSmart View Voice Terminal Image
+# Oh I'm Smart: a ThinkSmart View voice terminal
 
-[中文](README.md) | English
+[简体中文](README.md) | [繁體中文](README.zh-Hant.md) | English
 
 Turn a Lenovo **ThinkSmart View (model CD-18781Y)** into a local voice assistant: it boots straight into the voice interface, wakes up on "小麦小麦" (*Xiǎo Mài Xiǎo Mài*), and can talk to Claude, DeepSeek and many other large language models.
 
-The image is based on [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart) (Ubuntu 24.04 + postmarketOS kernel 6.19), without the Plasma desktop, and comes with:
+Oh I'm Smart is an extended version of [justhalfbit/thinksmart-ubuntu-image](https://github.com/justhalfbit/thinksmart-ubuntu-image). The image is based on [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart) (Ubuntu 24.04 + postmarketOS kernel 6.19), without the Plasma desktop, and comes with:
 
-- the voice client [xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client): wake word, conversation screen, sleep hours, brightness, online updates;
-- the Xiaozhi hub [xiaozhi-hub-server](https://github.com/justhalfbit/xiaozhi-hub-server): on-device speech recognition, connects to LLM and text-to-speech providers, with a web admin page;
+- the voice client [ohimsmart/oh-im-smart-client](https://github.com/ohimsmart/oh-im-smart-client) (from [justhalfbit/xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client)): wake word, conversation screen, sleep hours, brightness, online updates;
+- the Xiaozhi hub [ohimsmart/oh-im-smart-gateway](https://github.com/ohimsmart/oh-im-smart-gateway) (from [justhalfbit/xiaozhi-hub-server](https://github.com/justhalfbit/xiaozhi-hub-server)): on-device speech recognition, connects to LLM and text-to-speech providers, with a web admin page;
 - device fixes: both microphones, the speaker, screen blanking and proximity wake, Wi-Fi stability, GPU white-screen/freeze patches and more.
 
-The interface and the wake word are Chinese for now.
+The interface comes in Traditional Chinese, Simplified Chinese and English, chosen on first boot; the wake word "小麦小麦" is Chinese only.
 
 > ⚠️ Flashing wipes the original Teams / Android system. Before the first flash, **back up the whole eMMC** ([A2](#a2-back-up-the-whole-stock-emmc-required)). It is the only way back to the stock system later.
+
+The first Oh I'm Smart image is still being prepared, so the Releases page is empty for now; this sentence goes once it is published.
 
 This README is the complete flashing guide, written so that a person or an AI agent can follow it step by step.
 
@@ -40,17 +42,19 @@ If you are an AI agent the owner asked to help with flashing, read this whole se
 
 ### Goal
 
-Write the image from this repository's Releases to the `system` partition of the owner's ThinkSmart View so that it boots into the voice assistant, then help the owner through first-time setup (Wi-Fi, hub admin password, API key, new default passwords).
+Write the image from this repository's Releases to the `system` partition of the owner's ThinkSmart View so that it boots into the voice assistant, then help the owner through first-time setup (screen language, Wi-Fi, hub admin password, API key, new default password, time zone).
 
 ### Overall flow
 
 ```
 Step 0  Preparation: check the model → install edl → download and verify the files
 Step 1  Enter EDL mode → edl printgpt → pick a route by the size of the system partition
-  Route A (stock system): full backup → lk2nd to boot → bootstrap to system → boot
-                          → SSH into the bootstrap, rewrite the partition table → power off → EDL again → this image to system
+  Route A (stock system): full backup → lk2nd to boot → (optional) prepare the bootstrap with prepare.sh
+                          → bootstrap to system → boot → SSH into the bootstrap, rewrite the partition table
+                          → power off → EDL again → this image to system
   Route B (already Ubuntu): (optional) back up user data → EDL → this image to system
-Step 2  First boot: Wi-Fi on the screen → find the IP → hub admin password and API key → change both account passwords → try voice
+Step 2  First boot: choose the screen language → Wi-Fi on the screen → find the IP → hub admin password and API key
+        → change the ubuntu password, set the time zone → try voice
 ```
 
 ### Operations that need the owner's explicit yes first
@@ -61,7 +65,7 @@ Each of these is irreversible or wipes data. Before running one, tell the owner 
 | --- | --- | --- |
 | A2 | The full-backup target file already exists | The old backup is overwritten and gone. By default use another file name instead |
 | A3 | `edl w boot lk2nd.img` | The stock boot chain is replaced by lk2nd; Android/Teams will no longer boot |
-| A4 | `edl w system bootstrap…img` | The stock `system` partition is overwritten |
+| A4 | `edl w system <BOOTSTRAP_IMAGE>` (the downloaded one or the one `prepare.sh` made) | The stock `system` partition is overwritten |
 | A6 | Running `apply-ubuntu-gpt.sh` in the bootstrap | The whole partition table is rewritten; the stock vendor, cache, userdata and other partitions are deleted |
 | A8 / B3 | `edl w system thinksmart-ubuntu-…img` | Everything on `system` is overwritten (including chat history, API keys and Wi-Fi settings of the old system) |
 | — | Any `edl wf` (write back the whole disk) | The entire eMMC is overwritten. Only when the owner explicitly asks to return to stock |
@@ -77,9 +81,11 @@ An AI agent can't do these. At these points tell the owner exactly what to do an
 
 - plug and unplug the USB cable and the power cable, try another cable or another USB port on the computer;
 - the button combination for EDL mode (unplug the power cable → connect the USB cable → hold Volume + and Volume − → plug in the power cable → release the volume buttons after 3–5 seconds; see 1.1);
-- powering off and on: the device has **no power button**; plugging in the power cable turns it on. While the system is running, shut it down before unplugging: tap 「关机」 (Shut down) at the bottom of the voice interface's settings, or run `sudo systemctl halt` over SSH, and unplug 10 seconds after the screen goes black (the system takes a few more seconds to finish). Wait about 30 seconds before plugging it back in; plugged straight back in, it may not power on. The 「关机」 button comes with client 0.1.2; the image ships 0.1.0, so update it first under 「软件更新」 (Software update) in the settings. Don't use `sudo poweroff`: with the cable in, the device powers straight back on. Only unplug without shutting down when you can't (emergency mode, the lk2nd screen);
+- powering off and on: the device has **no power button**; plugging in the power cable turns it on. While the system is running, shut it down before unplugging: tap "Shut down" at the bottom of the voice interface's settings, or run `sudo systemctl halt` over SSH, and unplug 10 seconds after the screen goes black (the system takes a few more seconds to finish). Wait about 30 seconds before plugging it back in; plugged straight back in, it may not power on. Don't use `sudo poweroff`: with the cable in, the device powers straight back on. Only unplug without shutting down when you can't (emergency mode, the lk2nd screen);
 - look at the device screen and tell you what it shows (black, lk2nd screen, welcome page, voice interface…);
+- choose the screen language on the device on first boot;
 - pick the Wi-Fi network and type its password on the device's touchscreen;
+- answer `prepare.sh`'s questions (Wi-Fi name, Wi-Fi password, the bootstrap login password);
 - open the hub admin page in a browser, set the admin password, enter the API key;
 - say "小麦小麦" to the device to confirm voice works;
 - click "Allow" when macOS asks "Allow accessory to connect?", and "Yes" on a Windows UAC prompt.
@@ -91,6 +97,7 @@ An AI agent can't do these. At these points tell the owner exactly what to do an
 - Don't run `apply-ubuntu-gpt.sh` again on a device whose partition table was already rewritten, and don't run `sfdisk`, `dd` or `parted` on `/dev/mmcblk0` yourself.
 - Don't delete, move or overwrite the stock full backup `stock-full-emmc.bin`, and never upload it anywhere. It holds data unique to this device (serial numbers, calibration data, accounts from the stock system).
 - Don't write the owner's Wi-Fi password, API key or device passwords into logs or repositories, or send them to any third-party service.
+- Don't answer `prepare.sh`'s questions for the owner, and don't put the Wi-Fi password or the login password into commands, files or notes. Delete the bootstrap copy `prepare.sh` made once it has served (after A8).
 - Don't modify downloaded image files. If a checksum doesn't match, download again.
 - Never ask the owner to unplug or power off during a write.
 
@@ -98,7 +105,7 @@ An AI agent can't do these. At these points tell the owner exactly what to do an
 
 - For each step run the "command", then compare with the "expected output" and "how to tell it worked". Move on only when they match; otherwise see "if it fails", and if that doesn't solve it, stop and ask the owner.
 - Save the full output of every `edl` command (`2>&1 | tee LOGFILE`) to show the owner if something goes wrong.
-- **Find the device's IP yourself; don't ask the owner**: work out the subnet from the computer's own IP, scan the LAN with `nmap -p 22,16688 --open <subnet, e.g. 192.168.1.0/24>`, then open `http://<IP>:16688/admin` and check that the page title is 「小智 Hub 管理后台」 (Xiaozhi Hub admin). Exact commands, and what to do without nmap, are in [2.3](#23-find-the-devices-ip-address).
+- **Find the device's IP yourself; don't ask the owner**: work out the subnet from the computer's own IP, then scan the LAN in two stages. The bootstrap (A5) only opens port 22: use `nmap -p 22 --open <SUBNET, e.g. 192.168.1.0/24>`; its host name is `thinksmarter`. Once this image is flashed, use `nmap -p 22,16688 --open <SUBNET>`, then open `http://<IP>:16688/admin` and check that the page title is "Xiaozhi Hub Admin". Exact commands, and what to do without nmap, are in [2.3](#23-find-the-devices-ip-address).
 - Commands assume a macOS / Linux terminal. On Windows use PowerShell: after setting up `edl` as in [0.2 Windows](#windows-1011-untested), copy `edl` commands as they are; for the others use this table:
 
   | macOS / Linux | Windows PowerShell |
@@ -130,7 +137,7 @@ Only the **Lenovo ThinkSmart View CD-18781Y** is supported: 8-inch portrait scre
 
 You need:
 
-- a macOS, Linux or Windows computer with **at least 20 GB free** (stock full backup about 7.3 GB, bootstrap image about 1 GB, this image about 0.7 GB compressed and 3.5 GB unpacked);
+- a macOS, Linux or Windows computer with **at least 20 GB free** (stock full backup about 7.3 GB, bootstrap image about 1 GB, another 1 GB or so for the copy `prepare.sh` makes if you use it, this image about 0.7 GB compressed and 3.5 GB unpacked);
 - a USB cable **that carries data** (USB-C on the device side), plugged straight into the computer, not through a dock or hub;
 - [bkerler/edl](https://github.com/bkerler/edl), the Qualcomm EDL flashing tool; install commands per system below;
 - a tool for `.xz` files and an SSH client (macOS, Linux and Windows 10/11 all come with SSH).
@@ -209,13 +216,34 @@ edl --help
 
 Expected: the output starts with `Qualcomm Sahara / Firehose Client`, followed by a long usage text. If `edl` is not found: on macOS / Linux run `source ~/edl-venv/bin/activate` first; on Windows run the two "every new PowerShell window" lines above.
 
+#### Docker (only if you want `prepare.sh` in A4)
+
+`prepare.sh` modifies the bootstrap image inside a Docker container, so it needs Docker. If you only reach the bootstrap over the USB cable, skip this.
+
+- macOS: install Docker Desktop, accept the license on first start, and wait until it says it is running:
+
+  ```bash
+  brew install --cask docker-desktop
+  ```
+
+- Linux: install Docker Engine, add yourself to the `docker` group, then log out and back in:
+
+  ```bash
+  sudo apt install docker.io
+  sudo usermod -aG docker $USER
+  ```
+
+- Windows: untested.
+
+Docker is ready when `docker info` runs without an error.
+
 ### 0.3 Download the files
 
 Create a working directory such as `~/thinksmart` and put all the files below in it. All later commands run in this directory.
 
 | File | Where | Needed for |
 | --- | --- | --- |
-| `thinksmart-ubuntu-<date>.img.xz`, `SHA256SUMS` | latest release in this repository's [Releases](https://github.com/justhalfbit/thinksmart-ubuntu-image/releases) | both routes |
+| `thinksmart-ubuntu-<DATE>.img.xz`, `SHA256SUMS` | latest release in this repository's [Releases](https://github.com/ohimsmart/oh-im-smart/releases) | both routes |
 | `lk2nd.img` | upstream [prebuilt/lk2nd.img](https://github.com/rickx/ubuntu-thinksmart/raw/main/prebuilt/lk2nd.img) | route A only |
 | `bootstrap-pmos-ssh-generic-qcom-msm8953.img` and its `.sha256` | upstream release [bootstrap-2026-05-22](https://github.com/rickx/ubuntu-thinksmart/releases/tag/bootstrap-2026-05-22) | route A only |
 
@@ -229,7 +257,7 @@ curl -L -O https://github.com/rickx/ubuntu-thinksmart/releases/download/bootstra
 # This image: copy the download links of the two files of the latest release from the Releases page, and download them with curl -L -O as well
 ```
 
-In Windows PowerShell write `curl` as `curl.exe`; everything else stays the same. If GitHub is blocked or slow where you are, add a proxy to curl with `-x http://PROXY:PORT`, or download in a browser and move the files into this directory.
+In Windows PowerShell write `curl` as `curl.exe`; everything else stays the same. If GitHub is blocked or slow where you are, add a proxy to curl with `-x http://<PROXY>:<PORT>`, or download in a browser and move the files into this directory.
 
 ### 0.4 Verify the files
 
@@ -242,7 +270,7 @@ cat bootstrap-pmos-ssh-generic-qcom-msm8953.img.sha256
 
 Expected output:
 
-- the first command prints `thinksmart-ubuntu-<date>.img.xz: OK`;
+- the first command prints `thinksmart-ubuntu-<DATE>.img.xz: OK`;
 - the bootstrap image's SHA256 equals the value in the `.sha256` file: `7d79db19b0911647bf6ab0a9a2924ef5cf83b4674798a54acdcbd41cdf07921b`;
 - the SHA256 of `lk2nd.img` is `c81b036c75028c3d5aa915c72c89e075bc044360fe964c2ec0afb1d4a6f5209b`. That is upstream's version at the time of writing; if upstream updates lk2nd later, upstream wins.
 
@@ -253,11 +281,11 @@ If any of them doesn't match, download that file again; don't use it.
 ### 0.5 Unpack the image
 
 ```bash
-xz -dk thinksmart-ubuntu-<date>.img.xz
+xz -dk thinksmart-ubuntu-<DATE>.img.xz
 shasum -a 256 -c --ignore-missing SHA256SUMS
 ```
 
-Expected: two lines, `.img.xz: OK` and `.img: OK`. The unpacked `.img` is about 3.5 GB (`3466592256` bytes for version 20261101, `711307968` bytes compressed; later versions in the release notes). On Windows unpack with 7-Zip, then compare `Get-FileHash` with the `.img` line in `SHA256SUMS`.
+Expected: two lines, `.img.xz: OK` and `.img: OK`. The unpacked `.img` is about 3.5 GB; the release notes give each version's sizes. On Windows unpack with 7-Zip, then compare `Get-FileHash` with the `.img` line in `SHA256SUMS`.
 
 The `.img` is the content of the whole `system` partition and holds two small partitions, boot and root. On first boot the root partition grows to fill the whole `system` partition.
 
@@ -269,7 +297,7 @@ The `.img` is the content of the whole `system` partition and holds two small pa
 
 The device has no power button: plugging in the power cable turns it on, unplugging it cuts the power.
 
-1. Unplug the power cable. If the system is running, shut it down first (「关机」 in the settings or `sudo systemctl halt`) and unplug 10 seconds after the screen goes black. If the USB cable is plugged in, unplug it too. Then wait 30 seconds before the next steps; plugged straight back in after a shutdown, it may not power on and won't enter EDL.
+1. Unplug the power cable. If the system is running, shut it down first ("Shut down" in the settings or `sudo systemctl halt`) and unplug 10 seconds after the screen goes black. If the USB cable is plugged in, unplug it too. Then wait 30 seconds before the next steps; plugged straight back in after a shutdown, it may not power on and won't enter EDL.
 2. Connect the device to the computer with the USB cable.
 3. **Hold Volume + and Volume − together** and keep holding.
 4. While holding them, plug in the power cable.
@@ -322,6 +350,8 @@ Look at the `Length` on the `system:` line:
 
 ## Route A: first flash (device still on the stock system)
 
+> Experimental: not tested by Oh I'm Smart on a stock device. Route A follows upstream's steps; the Oh I'm Smart maintainers have not yet gone through it from start to finish on a device still running the stock system.
+
 Exactly the same order as upstream:
 
 ```
@@ -341,7 +371,7 @@ This is the **only way** back to the stock system later.
 
 ```bash
 cd ~/thinksmart
-ls -l stock-full-emmc.bin 2>/dev/null && echo "a backup file already exists: use another name, don't overwrite it"
+ls -l stock-full-emmc.bin 2>/dev/null && echo "stock-full-emmc.bin exists: use another name, don't overwrite it"
 edl rf stock-full-emmc.bin 2>&1 | tee backup.log
 ```
 
@@ -391,21 +421,48 @@ If it fails:
 
 ### A4. Flash the bootstrap image to the system partition (ask the owner first)
 
+First choose which bootstrap image to flash:
+
+1. **USB cable only**: flash the downloaded `bootstrap-pmos-ssh-generic-qcom-msm8953.img` and go straight to the flash command below.
+2. **Let the bootstrap use Wi-Fi as well (experimental: not tested by Oh I'm Smart on a stock device)**: when the USB network doesn't work (Windows not recognizing it, for example), the bootstrap can use Wi-Fi instead. Make a prepared copy with this repository's `prepare.sh` (install Docker first, see 0.2):
+
+   ```bash
+   git clone https://github.com/ohimsmart/oh-im-smart.git ~/oh-im-smart
+   cd ~/thinksmart
+   ~/oh-im-smart/bootstrap/prepare.sh bootstrap-pmos-ssh-generic-qcom-msm8953.img bootstrap-prepared.img
+   ```
+
+   It asks three things, which the owner answers:
+   - Wi-Fi name: empty means USB only; at most 32 bytes.
+   - Wi-Fi password: empty means an open network; otherwise 8–63 printable ASCII characters, or 64 hex digits.
+   - The bootstrap login password: 8 or more characters, at most 128 bytes, not `thinksmart`, typed twice.
+
+   Passwords don't show while typed. On success the last line is `prepare: wrote bootstrap-prepared.img. Delete it after flashing: it may hold your WiFi password, and holds a hash of your login password.`. Use `bootstrap-prepared.img` as `<BOOTSTRAP_IMAGE>` below. Windows is untested: it needs Docker Desktop, and the script runs in WSL's bash.
+3. Two reminders:
+   - the bootstrap's SSH is open on the LAN until Ubuntu is flashed, so the login password must not be the published default (`prepare.sh` already refuses `thinksmart`);
+   - after flashing this image (A8), delete `bootstrap-prepared.img`: it holds the Wi-Fi password and a hash of the login password.
+
+Flash (`<BOOTSTRAP_IMAGE>` is `bootstrap-pmos-ssh-generic-qcom-msm8953.img` or `bootstrap-prepared.img`):
+
 ```bash
-edl w system bootstrap-pmos-ssh-generic-qcom-msm8953.img 2>&1 | tee flash-bootstrap.log
+edl w system <BOOTSTRAP_IMAGE> 2>&1 | tee flash-bootstrap.log
 edl reset
 ```
 
 Expected output:
 
-- the first command ends with `Wrote bootstrap-pmos-ssh-generic-qcom-msm8953.img to sector 923648.`
+- the first command ends with `Wrote <BOOTSTRAP_IMAGE> to sector 923648.` (edl prints the name of the file you flashed)
 - `edl reset` prints `Reset succeeded.`
 
 The device reboots by itself: the lk2nd screen appears briefly, then postmarketOS starts. **Leave the USB cable in**; the next step uses it for SSH.
 
 ### A5. Log in to the bootstrap over SSH
 
-Once booted, the bootstrap provides a network over the USB cable: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically.
+Once booted, the bootstrap provides a network over the USB cable: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically. If A4 used `prepare.sh` with a Wi-Fi name, it also joins that Wi-Fi. Try three ways in order: wait for the USB network (steps 1–4 below); if it doesn't appear within two minutes, use Wi-Fi; if neither works, connect a keyboard and join Wi-Fi by hand on the device.
+
+Login password: if you used `prepare.sh`, the one you set there; if not, `thinksmart`, or the one you set in the "neither works" step below if you went through it.
+
+**Wait for the USB network:**
 
 1. Wait 1–2 minutes for the device to finish booting.
 2. Check that the computer has a new network interface:
@@ -413,12 +470,40 @@ Once booted, the bootstrap provides a network over the USB cable: the device is 
    - Linux: a new `usb0` or `enx…` interface in `ip -br addr`;
    - Windows (untested): a new Ethernet adapter in "Network Connections". The bootstrap uses a USB NCM network adapter; Windows 11 has an NCM driver built in and usually recognizes it, while the NCM driver built into Windows 10 is incompatible with some devices and may not. If it isn't recognized, see "Windows can't use the USB network" below.
 3. If the interface didn't get a `172.16.42.x` address, set it manually: IP `172.16.42.2`, subnet mask `255.255.0.0`, router empty.
-4. Log in (password `thinksmart`):
+4. Log in:
 
 ```bash
 ping -c 3 172.16.42.1
 ssh -o StrictHostKeyChecking=accept-new pmos@172.16.42.1
 ```
+
+**No USB network within two minutes, and A4 used `prepare.sh` with a Wi-Fi name:** use Wi-Fi. Look for host name `thinksmarter` in the router's device list, or scan the LAN (the bootstrap only opens port 22):
+
+```bash
+nmap -p 22 --open <SUBNET>
+ssh -o StrictHostKeyChecking=accept-new pmos@<BOOTSTRAP_IP>
+```
+
+**Neither works:** connect a USB keyboard and, in order:
+
+1. Log in as `pmos` on the device's screen.
+2. **If A4 didn't use `prepare.sh`, change the password and lock root before joining Wi-Fi.** Once on Wi-Fi, the bootstrap's SSH is open on the LAN, and in the upstream image both `pmos` and `root` have the published password `thinksmart`, with SSH accepting root password logins. Run the three lines below: the first sets your own password for `pmos` (8 or more characters, not `thinksmart`; it first asks for the current one, `thinksmart`), which A5 and A6 then use; the second locks `root`; the third checks the lock and should print one line starting with `root:!`:
+
+   ```sh
+   passwd
+   doas passwd -l root
+   doas grep '^root:!' /etc/shadow
+   ```
+
+   If it doesn't print that line, stop and don't join Wi-Fi.
+3. Run the four lines below, join Wi-Fi in `nmtui`, then find the IP and log in as in "use Wi-Fi" above:
+
+   ```sh
+   doas sh -c 'dbus-uuidgen > /etc/machine-id'
+   doas rc-service dbus start
+   doas rc-service networkmanager start
+   doas nmtui
+   ```
 
 After logging in, check that it's the right system:
 
@@ -433,7 +518,8 @@ If it fails:
 
 - No ping reply: check on the screen that postmarketOS is up; try another USB port; on macOS set the IP manually as in point 3; unplug and replug the USB cable.
 - The screen stays on lk2nd (it says fastboot): the bootstrap wasn't flashed correctly; go back to A1, enter EDL, redo A4.
-- Windows can't use the USB network (untested): use Wi-Fi instead. As upstream does on Windows, use upstream's script `sources/scripts/prepare-pmos-ssh-bootstrap-image.sh` in WSL to write the Wi-Fi name and password into the bootstrap image (usage in Stage 0 of upstream [FLASHING.md](https://github.com/rickx/ubuntu-thinksmart/blob/main/FLASHING.md)), go back to A1 and redo A4 with this new image, then after boot find the IP of host `thinksmarter` in the router and `ssh pmos@<IP>`. Or borrow a macOS or Linux computer for this one step.
+- Windows can't use the USB network (untested): add Wi-Fi with `prepare.sh` in A4 (Docker on Windows is untested), go back to A1, redo A4, then follow "use Wi-Fi" above; or borrow a macOS or Linux computer for this one step.
+- SSH says the host key changed (you connected to `172.16.42.1` or this IP before): see [3.6](#36-ssh-says-the-host-key-changed).
 
 ### A6. Rewrite the partition table (ask the owner first, irreversible)
 
@@ -443,7 +529,7 @@ In the SSH session on the bootstrap, run:
 sudo /usr/local/sbin/apply-ubuntu-gpt.sh
 ```
 
-If `sudo` asks for a password, it's `thinksmart` too. Expected end of the output:
+If `sudo` asks for a password, it's the one you logged in with in A5. Expected end of the output:
 
 ```
 GPT rewrite complete.
@@ -480,12 +566,12 @@ If `system` is still `0x0000000060000000`: the partition table wasn't rewritten;
 ### A8. Flash this image (ask the owner first)
 
 ```bash
-edl w system thinksmart-ubuntu-<date>.img 2>&1 | tee flash-system.log
+edl w system thinksmart-ubuntu-<DATE>.img 2>&1 | tee flash-system.log
 edl reset
 ```
 
 - Writing takes from a few minutes to twenty; don't touch the cable.
-- Expected: the output ends with `Wrote thinksmart-ubuntu-<date>.img to sector 923648.`, then `Reset succeeded.`
+- Expected: the output ends with `Wrote thinksmart-ubuntu-<DATE>.img to sector 923648.`, then `Reset succeeded.`
 
 If it fails:
 
@@ -493,6 +579,12 @@ If it fails:
 - Error halfway through: enter EDL again and retry once; if it still fails, stop and give `flash-system.log` to the owner.
 
 When done, unplug the USB cable and go to [step 2: first boot](#2-first-boot-and-setup).
+
+If A4 used `prepare.sh`, delete the prepared copy once this image has booted; it holds the Wi-Fi password and a hash of the login password:
+
+```bash
+rm ~/thinksmart/bootstrap-prepared.img
+```
 
 ---
 
@@ -515,7 +607,7 @@ Do [1.1](#11-enter-edl-owner-does-this) and [1.2](#12-read-the-partition-table),
 Exactly the same as [A8](#a8-flash-this-image-ask-the-owner-first):
 
 ```bash
-edl w system thinksmart-ubuntu-<date>.img 2>&1 | tee flash-system.log
+edl w system thinksmart-ubuntu-<DATE>.img 2>&1 | tee flash-system.log
 edl reset
 ```
 
@@ -527,14 +619,15 @@ Unplug the USB cable and go to step 2.
 
 ### 2.1 First boot
 
+- On first boot the screen first asks for the interface language (繁體中文 / 简体中文 / English); the welcome page comes after you tap one. You can change it later in the voice client's settings page.
 - The first boot is slower, about 1–2 minutes: the system grows the root partition to fill the whole `system` partition and generates this device's own SSH host keys. Later boots take about 20 seconds.
 - The screen shows the **welcome page** (dark background, with the device address and Wi-Fi status).
 
 ### 2.2 Connect Wi-Fi on the screen (owner does this)
 
-1. On the welcome page tap the 「连接 Wi‑Fi」 (Connect Wi-Fi) button, then tap your network in the 「选择 Wi‑Fi」 (Choose Wi-Fi) list.
-2. Type the password with the on-screen keyboard and tap 「连接」 (Connect). 「已连接 …」 (Connected …) means it worked.
-3. Once connected, the bottom of the welcome page shows 「设备地址」 (device address), and a few seconds later the screen switches to the voice assistant.
+1. On the welcome page tap the "Connect to Wi‑Fi" button, then tap your network in the "Choose Wi‑Fi" list.
+2. Type the password with the on-screen keyboard and tap "Connect". When the panel shows "Connected to <WiFi name>" and goes back to the network list, it worked.
+3. Tap the × at the top right to close the panel. The bottom of the welcome page shows "Device address", and a few seconds later the screen switches to the voice assistant.
 
 Can't connect? See [3.3](#33-no-wi-fi-or-wi-fi-setup-on-the-screen-fails).
 
@@ -563,7 +656,7 @@ AI agents: **find it yourself; don't ask the owner**.
 
    No nmap: `brew install nmap` on macOS, `sudo apt install nmap` on Linux. If 16688 doesn't show up, the hub may still be loading its speech recognition model; wait a minute and scan again.
 
-3. Confirm a candidate: open `http://<IP>:16688/admin`; if the page title is 「小智 Hub 管理后台」 (Xiaozhi Hub admin), it's the device. From the command line:
+3. Confirm a candidate: open `http://<IP>:16688/admin` in a browser; if the tab title is "Xiaozhi Hub Admin" (in a Chinese browser, the Chinese title), it's the device. The command line prints the page's original title, which is the same Chinese text whatever your browser's language, `小智 Hub 管理后台`:
 
    ```bash
    curl -s http://<IP>:16688/admin | grep -o '<title>[^<]*'
@@ -573,8 +666,8 @@ If nmap finds nothing on macOS, or `curl` / `ssh` says `No route to host`: the t
 
 Without nmap (works on Windows too; on Windows use `ipconfig` to see this computer's IP):
 
-- the DHCP client list (device list) in your router's admin page; the host name is `thinksmarter`;
-- the device screen: 「设备地址」 (device address) on the welcome page (after connecting to Wi-Fi the screen switches to the voice assistant almost at once, so it only flashes by), or 「本机 IP」 (Device IP) in the voice interface's settings page. For this one, ask the owner to read the screen to you.
+- the DHCP client list (device list) in your router's admin page; the host name is `thinksmart` (`thinksmarter` is the bootstrap's and the upstream image's host name);
+- the device screen: "Device address" on the welcome page (after connecting to Wi-Fi the screen switches to the voice assistant almost at once, so it only flashes by), or "Device IP" in the voice interface's settings page. For this one, ask the owner to read the screen to you.
 
 Below, `<DEVICE_IP>` stands for this address.
 
@@ -599,22 +692,18 @@ AI agents: the owner types the API key into the browser. Don't enter it for them
 
 ### 2.5 Change the default passwords (do it right after flashing)
 
-As upstream, the image has two accounts that can log in, **both with the default password `thinksmart`, both reachable over SSH**:
+This image has one account that can log in, **with the default password `thinksmart`, reachable over SSH**; `root` is locked and can't log in:
 
 | Account | Default password | Notes |
 | --- | --- | --- |
 | `ubuntu` | `thinksmart` | everyday account, passwordless sudo |
-| `root` | `thinksmart` | administrator, **SSH also allows root to log in with a password** |
 
-Anyone on the same network who knows the default password can log in to the device, so change both passwords; changing only `ubuntu` is not enough:
+`ubuntu` uses `sudo` without a password on purpose: the update and backup scripts rely on it. So `ubuntu`'s password is in effect the device's administrator password, and anyone on the same network who knows the default can take full control. Change it:
 
 ```bash
 ssh ubuntu@<DEVICE_IP>
 passwd               # change ubuntu's password
-sudo passwd root     # change root's password
 ```
-
-If you don't need remote root logins, you can lock root's password instead (`sudo passwd -l root`) and use `ubuntu` with `sudo` when you need administrator rights.
 
 If you have SSH'd to this device before (including `172.16.42.1` during the bootstrap), its host key has changed; clear the old entries first:
 
@@ -623,12 +712,23 @@ ssh-keygen -R <DEVICE_IP>
 ssh-keygen -R 172.16.42.1
 ```
 
-AI agents: the owner types the new passwords themselves. Don't make one up for them and don't record it.
+AI agents: the owner types the new password themselves. Don't make one up for them and don't record it.
 
-### 2.6 Check that voice works (owner does this)
+### 2.6 Set the time zone
 
-1. Say "**小麦小麦**" (*Xiǎo Mài Xiǎo Mài*; it also answers to 「哈喽小麦」 *Hā lou Xiǎo Mài* and 「小麦同学」 *Xiǎo Mài tóng xué*) to the device. The screen switches to listening and a prompt sound plays.
-2. Ask something, for example 「今天星期几」 ("what day is it today"), and wait for the answer.
+The image defaults to UTC. Over SSH, set your own time zone and check it:
+
+```bash
+sudo timedatectl set-timezone <TIME_ZONE>
+timedatectl
+```
+
+Common ones: `America/Los_Angeles`, `Europe/London`, `Asia/Hong_Kong`. `timedatectl list-timezones` gives the full list. In the output of `timedatectl`, the `Time zone` line should show the zone you set.
+
+### 2.7 Check that voice works (owner does this)
+
+1. Say "**小麦小麦**" (*Xiǎo Mài Xiǎo Mài*; it also answers to "哈喽小麦" *Hā lou Xiǎo Mài* and "小麦同学" *Xiǎo Mài tóng xué*) to the device. The wake words are Chinese only. The screen switches to listening and a prompt sound plays.
+2. Ask something in the speech language set in the hub admin page, and wait for the answer. To speak English, first set "Speech language" to English in the hub admin page; then ask, for example, "What day is it today?".
 
 If it doesn't respond, check the services over SSH:
 
@@ -675,13 +775,13 @@ What to do:
 ### 3.3 No Wi-Fi, or Wi-Fi setup on the screen fails
 
 - The welcome page lists nearby networks. If yours isn't there, check that the router broadcasts normally on 2.4 GHz or 5 GHz (a hidden SSID has to be typed in).
-- Right password but stuck at 「正在获取网络地址」 (getting a network address): wait a minute; if it doesn't help, reboot the device once.
+- Right password but stuck at "Password accepted, getting a network address…": wait a minute; if it doesn't help, reboot the device once.
 - The flashed system currently can't be reached over a USB cable (see the [appendix](#usb-network-after-flashing)). If Wi-Fi setup on the screen keeps failing: reboot the device and try again; if that doesn't help, reflash (A8 / B3) and set up Wi-Fi again.
 - When you can already SSH in over Wi-Fi and want to switch to another network, connect from the command line:
 
   ```bash
   nmcli dev wifi list
-  sudo nmcli dev wifi connect "WIFI_NAME" password "WIFI_PASSWORD"
+  sudo nmcli dev wifi connect "<WIFI_NAME>" password "<WIFI_PASSWORD>"
   ip -4 -br addr show wlan0
   ```
 
@@ -701,6 +801,13 @@ wpctl get-volume @DEFAULT_AUDIO_SINK@
 - The device's microphone switch (privacy switch) must be on; while it's off the assistant can't hear you.
 - Services fine but still no sound: reboot the device. Its audio DSP occasionally gets stuck, and only a reboot brings it back.
 - **Don't touch the sound card hardware directly** (`speaker-test -D hw:…`, `aplay -D hw:…` and the like): it can lock up the audio DSP. All sound goes through PipeWire.
+- To restart WirePlumber on its own (after changing its configuration, say), stop the microphone service first and start it again afterwards. Otherwise the microphone service holds the capture device, WirePlumber can't find the sound card, and only a `Dummy Output` is left:
+
+  ```bash
+  systemctl --user stop thinksmart-mic && systemctl --user restart wireplumber && sleep 5 && systemctl --user start thinksmart-mic
+  ```
+
+  The voice client notices the sound dropped and restarts itself (about 20 seconds).
 
 ### 3.5 The screen never reaches the interface (black, white, or stuck on the welcome page)
 
@@ -760,7 +867,7 @@ Fix (rewrites only the boot partition, your data stays):
 3. Take the boot partition out of the image of **the version you flashed** (it starts at sector 2048 and is 509952 sectors long):
 
    ```bash
-   dd if=thinksmart-ubuntu-<date>.img of=boot-part.img bs=512 skip=2048 count=509952
+   dd if=thinksmart-ubuntu-<DATE>.img of=boot-part.img bs=512 skip=2048 count=509952
    ```
 
    On Windows run it in WSL.
@@ -832,19 +939,17 @@ Prerequisites: flashed, Wi-Fi connected on the screen, `<DEVICE_IP>` known. The 
    - Expected output: first `restoring: …`, at the end `restored on the device` and `done; the hub needs about a minute to load its speech model`.
    - The script first unpacks the whole backup into a temporary directory on the device, and only when that fully succeeds stops the services and replaces files; if any step fails it exits with an error, the device stays as it was, and the services are started again.
 
-3. After restoring, the hub's admin password and API keys are back as they were in the backup. Device passwords aren't in the backup; change them again as in 2.5.
+3. After restoring, the hub's admin password and API keys are back as they were in the backup. The device password and the time zone aren't in the backup; when restoring onto a freshly flashed device, do 2.5 and 2.6 again.
 
 ---
 
 ## 5. Updates
 
-- **Voice client**: check under 「软件更新」 (software update) in the settings page and tap 「更新」 (update) when a new version is available. Updates are downloaded over HTTPS only, the size and sha256 of every file are checked before installing, and a broken install rolls back to the old version automatically.
+- **Voice client**: check under "Software update" in the settings page and tap "Update" when a new version is available. Updates come from the Releases of [ohimsmart/oh-im-smart-client](https://github.com/ohimsmart/oh-im-smart-client). Updates are downloaded over HTTPS only, the size and sha256 of every file are checked before installing, and a broken install rolls back to the old version automatically.
 
   To publish client updates yourself (for example of your own modified client): generate the update manifest and packages with `update/make-release.py` from this repository, upload the files to a Release of your own GitHub repository, and change `SOURCES` in `/etc/thinksmart-update.conf` on the device to your repository's Release address. No keys are needed. Updates aren't signed, so whatever the update address serves is installed as root: put only addresses you control or trust in `SOURCES`, **never a public GitHub download mirror or proxy site**. Usage in `update/README.md`.
-- **System layer** (kiosk shell, welcome page, screen keyboard, screen blanking and proximity, microphone service, audio and Bluetooth speaker configuration, the updater itself): shown in the same 「软件更新」 card as the client; one tap installs the system layer first, then the client. Every file about to be replaced is backed up first; after installing, the services using them restart (the screen flickers once) and are checked, and the backup goes back if they don't come up. System layer packages are published in the same Release as the client (on the client repository); this repository's Releases only hold images to flash. Only the files listed in `image/system-files.txt` are replaced: the kernel, drivers, boot partition and apt packages are not (those need a reflash), and configuration you changed such as `/etc/thinksmart-kiosk.conf` is never overwritten.
-
-  Devices flashed with the 20261101 image install one client update first (it brings the updater that can install the system layer); system layer updates show up after that.
-- **Hub**: in the hub admin page (`http://<DEVICE_IP>:16688/admin`), click 「更新网关」 (update hub) in the sidebar. The page shows the time and short commit hash of the current version and can check for a new one; it only installs when you click update, and a failed update rolls back automatically.
+- **System layer** (kiosk shell, welcome page, screen keyboard, screen blanking and proximity, microphone service, audio and Bluetooth speaker configuration, the updater itself): shown in the same "Software update" card as the client; one tap installs the system layer first, then the client. Every file about to be replaced is backed up first; after installing, the services using them restart (the screen flickers once) and are checked, and the backup goes back if they don't come up. System layer packages are published in the same Release as the client (on the client repository); this repository's Releases only hold images to flash. Only the files listed in `image/system-files.txt` are replaced: the kernel, drivers, boot partition and apt packages are not (those need a reflash), and configuration you changed such as `/etc/thinksmart-kiosk.conf` is never overwritten.
+- **Hub**: in the hub admin page (`http://<DEVICE_IP>:16688/admin`), click "Update gateway" in the sidebar; updates come from [ohimsmart/oh-im-smart-gateway](https://github.com/ohimsmart/oh-im-smart-gateway). The page shows the time and short commit hash of the current version and can check for a new one; it only installs when you click update, and a failed update rolls back automatically.
 
   From the command line instead, after SSH-ing into the device:
 
@@ -890,10 +995,15 @@ Compared with the upstream image, besides dropping the Plasma desktop and bootin
 - Wi-Fi power save off: this QCA9379 adapter misses DHCP replies in power save, so after a boot it took 1–3 minutes to get an IP.
 - 41 key packages held at their versions (see [section 5](#5-updates)).
 - The proximity sensor is read directly from `/dev/i2c-0` (`ubuntu` is in the `i2c` group) instead of calling sudo every second and flooding the logs.
-- Time sync uses NTP servers reachable from China: `ntp.aliyun.com`, `ntp.tencent.com`, `cn.pool.ntp.org`, with `ntp.ubuntu.com` as fallback. The time zone is Beijing time; outside China set your own, for example `sudo timedatectl set-timezone Europe/Berlin`.
+- Time sync uses five NTP servers, reachable both inside and outside China: `ntp.aliyun.com`, `ntp.tencent.com`, `cn.pool.ntp.org`, `pool.ntp.org`, `ntp.ubuntu.com`. The time zone defaults to UTC; see [2.6](#26-set-the-time-zone).
+- The host name is `thinksmart`; `root` is locked and only `ubuntu` can log in (see [2.5](#25-change-the-default-passwords-do-it-right-after-flashing)).
 - Logs live only in the systemd journal (persistent, at most 64 MB and one month); rsyslog, which wrote a second copy to `/var/log`, is off. Read logs with `journalctl`.
 - No crash dumps (core dumps), to save disk space; zram compressed memory is on.
 - ModemManager, avahi and udisks2, which aren't needed, are disabled.
+- The on-screen keyboard is a system keyboard: the kiosk shell adds it to every page, and it slides up from the bottom of the screen when an input field is tapped (`kiosk/keyboard.js`). Pages use plain input fields and bring no keyboard of their own.
+- On first boot the screen language is chosen first (繁體中文 / 简体中文 / English); until then the kiosk stays on the welcome page. Devices updated online from an older version (including ones showing their own web page) also stop once to choose. The choice is stored in `/home/ubuntu/.config/thinksmart-kiosk/lang`: the welcome page, the voice client (the shell adds `?lang=` when it opens the client on local port 8090) and the on-screen keyboard all follow it. Changing the language in the client's settings page writes the same file; the language button at the bottom of the welcome page chooses again.
+- The voice client's settings page can switch Wi-Fi and the screen language too: the shell accepts these requests only from two kinds of page, the local welcome page and a kiosk address that is this device itself (127.0.0.1/localhost, the client by default). When the kiosk points at someone else's service it gets no such rights, and pages on the LAN can't reach them.
+- Bluetooth speaker: only A2DP receiving is on (a phone plays music to it); hands-free (HFP/HSP) is off, so a phone won't route calls to it. The phone's sound doesn't go straight to the speaker: the voice client mixes it into its own output, so the wake word still works while music plays (`bluetooth/`). Pairing, the on/off switch and the phone list are in the client's settings page; pairing is only accepted for 3 minutes after tapping "+ Add a phone", with no PIN.
 
 Known limitations:
 
@@ -902,11 +1012,14 @@ Known limitations:
 - The flashed system can't be reached over a USB cable, only over Wi-Fi (see [USB network after flashing](#usb-network-after-flashing)).
 - To block pinch zoom the screen only takes the first finger. When typing fast on the on-screen keyboard with two alternating fingers, a second finger that lands before the first one lifts is dropped, losing a character. Type Wi-Fi passwords slowly, one finger at a time.
 - The GPU, Wi-Fi and Bluetooth firmware in the image come from the same sources as upstream's (following upstream).
+- While a phone plays music over Bluetooth, the voice client runs echo cancellation all the time, using about 70% of one core (about 20% without music). Wi-Fi and Bluetooth share one chip, so 2.4 GHz Wi-Fi may slow down while Bluetooth plays music.
+- The phone shows the device with a tablet icon: BlueZ sets the device class from the machine type, and it can't be changed in `main.conf`.
 
 ---
 
 ## Credits and notices
 
+- Oh I'm Smart is an extended version of [justhalfbit](https://github.com/justhalfbit)'s [thinksmart-ubuntu-image](https://github.com/justhalfbit/thinksmart-ubuntu-image), [xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client) and [xiaozhi-hub-server](https://github.com/justhalfbit/xiaozhi-hub-server): the image, the voice client and the hub all start from them. Origins and licenses are in [NOTICE](NOTICE) and [LICENSE](LICENSE).
 - The device port, lk2nd, the bootstrap image and the partitioning scheme come from [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart); this project wouldn't exist without it. Upstream in turn credits FelixKa's postmarketOS device package and TAS5782M driver, and the postmarketOS project's kernel.
 - The flashing tool is [bkerler/edl](https://github.com/bkerler/edl).
 - The image is built from Ubuntu 24.04 packages. This is a personal project, not affiliated with Canonical, Lenovo or Qualcomm. "Ubuntu" and "ThinkSmart" are trademarks of their respective owners.
@@ -917,9 +1030,12 @@ Known limitations:
 | Folder | Contents |
 | --- | --- |
 | `image/` | Building the image (capture from a device, clean, pack) and backing up / restoring user data |
+| `bootstrap/` | Preparing the bootstrap image (`prepare.sh`: Wi-Fi, your own login password) |
+| `tools/` | The check that the three tutorials agree (`check-readmes.sh`) |
 | `kiosk/` | The kiosk shell (Weston + a full-screen WebKitGTK page), welcome page, on-screen keyboard, GPU watchdog, Wi-Fi power-save and NTP settings |
 | `screen/` | Screen blanking, proximity and motion wake |
 | `xiaozhi/` | The microphone service and audio configuration (ALSA, PipeWire, WirePlumber) |
+| `bluetooth/` | Bluetooth speaker: WirePlumber configuration (A2DP receiving only, the phone's sound handed to the voice client) and BlueZ settings |
 | `update/` | Online updates (voice client and system layer) |
 | `mesa/` | Build script and patches of the patched Mesa (GPU white screen and hang fixes) |
 | `codec-dmic/`, `kernel/` | Driver and device-tree patch for the second microphone, and the kernel environment it is built in |

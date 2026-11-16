@@ -268,19 +268,27 @@ UM 的前置準備：
 
 - **可選用：** 只用 USB 的用戶可以照上游直接刷未改動的 bootstrap 映像，不必執行 `prepare.sh`。
 - 在一般權限的 Docker 容器裏執行（不用 `--privileged`），容器映像要包含 e2fsprogs 和 openssl。以 `--user $(id -u):$(id -g)` 執行並設定 `umask 077`：輸出檔建立在權限 700 的暫存目錄裏、權限 600，失敗或中斷時由 `trap` 刪除未完成的檔案。教學 §0.2 的事前準備加入 Docker。
-- **改寫方式：** 不用 loop 裝置。用 `sfdisk -J` 讀出 bootstrap 映像的分區表，找出 ext4 根分區的位元組偏移；找不到或檔案系統不是 ext4 就拒絕執行。以 `debugfs -w` 改寫：每個檔案先 `rm` 再 `write`，再用 `set_inode_field` 設定 mode、uid 0、gid 0，最後讀回內容比對。`debugfs` 遇到單一指令錯誤時通常仍以 0 結束，所以每一步都以讀回結果判斷成敗，不看結束碼。
+- **改寫方式：** 不用 loop 裝置。用 `sfdisk -d` 讀出 bootstrap 映像的分區表（Alpine 容器裏沒有 JSON 解析工具），找出卷名是 `pmOS_root`、有 `extent` 功能的根分區的位元組偏移；找不到就拒絕執行。只接受 `/etc/machine-id` 是空的映像，也就是未改動的上游映像：在改過的映像上，`debugfs` 釋放舊 WiFi 檔案時不會清除內容，舊密碼會留在空閒空間裏。以 `debugfs -w` 改寫：每個檔案先 `rm` 再 `write`，再用 `set_inode_field` 設定 mode、uid 0、gid 0，最後讀回內容比對。`debugfs` 遇到單一指令錯誤時通常仍以 0 結束，所以每一步都以讀回結果判斷成敗，不看結束碼。
 - 只做四件事：
   1. 寫入新的 32 位十六進位 `machine-id`。
-  2. 用 `IFS= read -r`（密碼加 `-s`）互動讀取 WiFi 名稱和密碼，保留反斜線和前後空格。按 NetworkManager keyfile 的規則跳脫後，寫成 `wlan0` 的 `.nmconnection`，擁有者 `0:0`、權限 600、`autoconnect=true`。密碼不經命令列參數傳遞。WiFi 名稱留空就略過 WiFi，只用 USB；密碼留空表示開放網絡（`key-mgmt` 不設定）。
+  2. 互動讀取 WiFi 名稱和密碼，保留反斜線和前後空格（所以都用 `IFS=` 和 `-r`）：WiFi 名稱用 `IFS= read -r`，輸入時顯示；在終端機上密碼用 `IFS= read -rsp`，`-p` 讓 bash 在關掉回顯之後才印出問題，馬上打字也不會顯示；從管道讀入時密碼用 `IFS= read -r`。WiFi 名稱一律寫成十進位位元組清單（`ssid=` 後面以 `;` 分隔的數字），密碼按 NetworkManager keyfile 的規則跳脫（反斜線加倍、開頭的空格寫成 `\s`）。寫成 `wlan0` 的 `.nmconnection`，擁有者 `0:0`、權限 600、`autoconnect=true`。密碼不經命令列參數傳遞。WiFi 名稱留空就略過 WiFi，只用 USB；密碼留空表示開放網絡（`key-mgmt` 不設定）。
   3. 互動讀取 bootstrap 登入密碼，不設預設值，要求至少 8 個字元，並拒絕 `thinksmart`。用 `openssl passwd -6 -stdin` 產生雜湊，只套用到 `pmos`，並鎖定 `root`。
-  4. 清除映像裏的 SSH 主機金鑰，加入開機時執行 `ssh-keygen -A` 的腳本。
+  4. 清除映像裏的 SSH 主機金鑰。映像的 sshd 服務每次啟動會自己產生缺少的金鑰，`prepare-image.sh` 確認這一點，不另加開機腳本。
 - 不啟用 rickx 的自動改分區服務。
 
 **改好的映像同時支援 USB 和 WiFi**，USB 網絡設定原封不動。所以這是**額外加上**的連線方式，不是取代 USB。教學的 A5 改為：
 
 1. 先等 USB 網絡（`172.16.42.1`），跟上游一樣。
-2. 兩分鐘內沒有出現的話，改用 WiFi：在路由器的裝置列表找主機名稱 `thinksmarter`，或用 `nmap -p 22 --open <你的網段>` 掃描。bootstrap 階段只開放 port 22，所以「給 AI 助手的說明」那一節也要改為只掃 port 22；port 16688 留到刷完 Ubuntu 之後才用。
-3. 兩者都失敗時，接上 USB 鍵盤，在裝置上執行以下手動修正：
+2. 兩分鐘內沒有出現，而且 A4 用了 `prepare.sh` 並填了 WiFi 的話（沒改過的映像沒有 WiFi 設定），改用 WiFi：在路由器的裝置列表找主機名稱 `thinksmarter`，或用 `nmap -p 22 --open <你的網段>` 掃描。bootstrap 階段只開放 port 22，所以「給 AI 助手的說明」那一節也要改為只掃 port 22；port 16688 留到刷完 Ubuntu 之後才用。
+3. 兩者都失敗時，接上 USB 鍵盤，在裝置上以 `pmos` 登入。沒用 `prepare.sh` 的話，連 WiFi 之前先改密碼、鎖定 root：上游映像的 `pmos` 和 `root` 密碼都是公開的 `thinksmart`，sshd 也允許 root 用密碼登入。
+
+   ```sh
+   passwd
+   doas passwd -l root
+   doas grep '^root:!' /etc/shadow
+   ```
+
+   最後一行要印出以 `root:!` 開頭的一行，否則停下，不連 WiFi。然後執行以下手動修正：
 
    ```sh
    doas sh -c 'dbus-uuidgen > /etc/machine-id'
@@ -308,7 +316,7 @@ UM 的前置準備：
 - 沒有自動改分區服務的連結；
 - 以一個測試用密碼執行時，處理程序清單和日誌都不會出現它。
 
-macOS Docker Desktop 上至少要跑一次相同的檢查。Windows 標示為未實測。
+macOS Docker Desktop 上至少要跑一次相同的檢查。Windows 標示為未實測。一個 WiFi 名稱留空的映像也在 macOS 上跑過（4b 計劃 Task 2）。
 
 ## 8. 安全
 

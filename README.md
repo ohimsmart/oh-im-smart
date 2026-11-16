@@ -1,18 +1,20 @@
-# ThinkSmart View 语音终端系统镜像
+# Oh I'm Smart：ThinkSmart View 语音终端
 
-中文 | [English](README.en.md)
+简体中文 | [繁體中文](README.zh-Hant.md) | [English](README.en.md)
 
 把联想 **ThinkSmart View（型号 CD-18781Y）** 刷成一台本地语音助手：开机直接进语音界面，说「小麦小麦」唤醒，背后可以接 Claude、DeepSeek 等多种大模型。
 
-镜像基于 [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart)（Ubuntu 24.04 + postmarketOS 内核 6.19），去掉了 Plasma 桌面，预装：
+Oh I'm Smart 是 [justhalfbit/thinksmart-ubuntu-image](https://github.com/justhalfbit/thinksmart-ubuntu-image) 的延伸版本。镜像基于 [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart)（Ubuntu 24.04 + postmarketOS 内核 6.19），去掉了 Plasma 桌面，预装：
 
-- 语音客户端 [xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client)：唤醒、对话界面、睡眠时段、亮度、在线更新；
-- 小智网关 [xiaozhi-hub-server](https://github.com/justhalfbit/xiaozhi-hub-server)：本机语音识别，接各家大模型和语音合成，带网页管理后台；
+- 语音客户端 [ohimsmart/oh-im-smart-client](https://github.com/ohimsmart/oh-im-smart-client)（出自 [justhalfbit/xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client)）：唤醒、对话界面、睡眠时段、亮度、在线更新；
+- 小智网关 [ohimsmart/oh-im-smart-gateway](https://github.com/ohimsmart/oh-im-smart-gateway)（出自 [justhalfbit/xiaozhi-hub-server](https://github.com/justhalfbit/xiaozhi-hub-server)）：本机语音识别，接各家大模型和语音合成，带网页管理后台；
 - 设备修复：两颗麦克风、扬声器、屏幕熄屏和接近唤醒、WiFi 稳定性、GPU 白屏/卡死补丁等。
 
-目前界面和唤醒词都是中文。
+界面有繁体中文、简体中文和英文，首次开机时选择；唤醒词「小麦小麦」只有中文。
 
 > ⚠️ 刷机会清掉原来的 Teams / Android 系统。第一次刷之前**一定先整盘备份 eMMC**（[A2](#a2-整盘备份原厂-emmc必做)），这是以后回到原厂的唯一办法。
+
+第一个 Oh I'm Smart 镜像还在准备中，Releases 页面暂时是空的；发布后这句会删掉。
 
 本文就是完整的刷机教程，写成了人和 AI 助手都能照着一步步做的样子。
 
@@ -40,17 +42,19 @@
 
 ### 目标
 
-把本仓库 Release 里的镜像写进用户这台 ThinkSmart View 的 `system` 分区，让它开机进入语音助手界面，然后陪用户完成首次设置（WiFi、网关管理员密码、API Key、改默认密码）。
+把本仓库 Release 里的镜像写进用户这台 ThinkSmart View 的 `system` 分区，让它开机进入语音助手界面，然后陪用户完成首次设置（界面语言、WiFi、网关管理员密码、API Key、改默认密码、时区）。
 
 ### 整体流程
 
 ```
 第 0 步  准备：确认型号 → 装 edl → 下载并校验文件
 第 1 步  进 EDL 模式 → edl printgpt → 按 system 分区大小选路线
-  路线 A（原厂系统）：整盘备份 → 刷 lk2nd 到 boot → 刷 bootstrap 到 system → 开机
-                      → SSH 进 bootstrap 改分区表 → 关机 → 再进 EDL → 刷本镜像到 system
+  路线 A（原厂系统）：整盘备份 → 刷 lk2nd 到 boot →（可选）用 prepare.sh 准备 bootstrap
+                      → 刷 bootstrap 到 system → 开机 → SSH 进 bootstrap 改分区表
+                      → 关机 → 再进 EDL → 刷本镜像到 system
   路线 B（刷过 Ubuntu）：（可选）备份用户数据 → 进 EDL → 刷本镜像到 system
-第 2 步  首次开机：屏幕配 WiFi → 找 IP → 网关后台设密码、填 API Key → 改两个账号的密码 → 试语音
+第 2 步  首次开机：选界面语言 → 屏幕配 WiFi → 找 IP → 网关后台设密码、填 API Key
+         → 改 ubuntu 的密码、设时区 → 试语音
 ```
 
 ### 必须先停下来、得到用户明确同意才能做的操作
@@ -61,7 +65,7 @@
 | --- | --- | --- |
 | A2 | 整盘备份时，目标文件已经存在 | 覆盖旧备份，旧备份就没了。默认换个文件名，不要覆盖 |
 | A3 | `edl w boot lk2nd.img` | 原厂 bootloader 链被换成 lk2nd，Android/Teams 从此起不来 |
-| A4 | `edl w system bootstrap…img` | 原厂 `system` 分区被覆盖 |
+| A4 | `edl w system <bootstrap 镜像>`（下载的或 `prepare.sh` 改好的） | 原厂 `system` 分区被覆盖 |
 | A6 | 在 bootstrap 里运行 `apply-ubuntu-gpt.sh` | 改写整张分区表，原厂的 vendor、cache、userdata 等分区被删掉 |
 | A8 / B3 | `edl w system thinksmart-ubuntu-…img` | `system` 分区原有内容全部被覆盖（包括旧系统里的聊天记录、API Key、WiFi 配置） |
 | — | 任何 `edl wf`（整盘写回） | 整个 eMMC 被覆盖。只有用户明确要求回原厂时才用 |
@@ -77,9 +81,11 @@ AI 助手做不了这些，到这一步要明确告诉用户做什么，等用�
 
 - 插拔 USB 线和电源线、换线、换电脑上的 USB 口；
 - 按键组合进 EDL 模式（拔电源线 → 插 USB 线 → 按住音量 + 和音量 − → 插电源线 → 3～5 秒后松开音量键，见 1.1）；
-- 关机和开机：这台设备**没有电源键**，插上电源线就开机。系统开着时要先关机再拔电：在语音界面的设置页最底下点「关机」，或者 SSH 运行 `sudo systemctl halt`，屏幕变黑后等 10 秒再拔（黑屏后系统还要几秒才收尾）。拔掉后要等 30 秒左右再插上才会开机，马上插回去可能开不了机。「关机」按钮从客户端 0.1.2 起才有，镜像自带的是 0.1.0，先在设置页「软件更新」里更新。不要用 `sudo poweroff`：插着电时它会马上重新开机。关不了机（比如停在紧急模式、lk2nd 界面）才直接拔；
+- 关机和开机：这台设备**没有电源键**，插上电源线就开机。系统开着时要先关机再拔电：在语音界面的设置页最底下点「关机」，或者 SSH 运行 `sudo systemctl halt`，屏幕变黑后等 10 秒再拔（黑屏后系统还要几秒才收尾）。拔掉后要等 30 秒左右再插上才会开机，马上插回去可能开不了机。不要用 `sudo poweroff`：插着电时它会马上重新开机。关不了机（比如停在紧急模式、lk2nd 界面）才直接拔；
 - 看设备屏幕，告诉你上面显示什么（黑屏、lk2nd 界面、欢迎页、语音界面……）；
+- 首次开机在屏幕上选界面语言；
 - 在设备触摸屏上选 WiFi、输入 WiFi 密码；
+- 回答 `prepare.sh` 的问题（WiFi 名称、WiFi 密码、bootstrap 的登录密码）；
 - 在浏览器里打开网关管理后台，设置管理员密码、填 API Key；
 - 对着设备说「小麦小麦」，确认语音能用；
 - macOS 弹出「允许配件连接？」时点「允许」，Windows 弹出 UAC 时点「是」。
@@ -91,6 +97,7 @@ AI 助手做不了这些，到这一步要明确告诉用户做什么，等用�
 - 不能在已经改过分区表的设备上再运行 `apply-ubuntu-gpt.sh`，也不能自己对 `/dev/mmcblk0` 运行 `sfdisk`、`dd`、`parted`。
 - 不能删除、移动、覆盖原厂整盘备份 `stock-full-emmc.bin`，也不能把它上传到任何地方。里面有这台设备独有的数据（序列号、校准数据、原厂系统里的账号信息）。
 - 不能把用户的 WiFi 密码、API Key、设备密码写进日志、提交到仓库，或发给任何第三方服务。
+- 不能替用户回答 `prepare.sh` 的问题，不能把 WiFi 密码或登录密码写进命令、文件或记录。`prepare.sh` 改好的 bootstrap 副本用完（A8 之后）就删掉。
 - 不能修改下载来的镜像文件。校验和对不上就重新下载。
 - 写入过程中不要叫用户拔线或断电。
 
@@ -98,7 +105,7 @@ AI 助手做不了这些，到这一步要明确告诉用户做什么，等用�
 
 - 每一步先执行「命令」，再对照「期望输出」和「怎么判断成功」。对上了才进下一步；对不上就看「失败了怎么办」，还解决不了就停下来问用户。
 - 把每条 `edl` 命令的完整输出保存下来（`2>&1 | tee 日志文件`），出问题时给用户看。
-- 设备的 IP **自己找，不要问用户**：先从本机 IP 算出网段，用 `nmap -p 22,16688 --open <网段，比如 192.168.1.0/24>` 扫局域网，再打开 `http://<IP>:16688/admin` 确认标题是「小智 Hub 管理后台」。具体命令和没有 nmap 时的办法见[2.3](#23-找到设备的-ip)。
+- 设备的 IP **自己找，不要问用户**：先从本机 IP 算出网段，再分两个阶段扫局域网。bootstrap 阶段（A5）只开 22 端口，用 `nmap -p 22 --open <网段，比如 192.168.1.0/24>`，主机名是 `thinksmarter`；刷入本镜像之后用 `nmap -p 22,16688 --open <网段>`，再打开 `http://<IP>:16688/admin` 确认标题是「小智 Hub 管理后台」。具体命令和没有 nmap 时的办法见[2.3](#23-找到设备的-ip)。
 - 本文的命令默认在 macOS / Linux 的终端里运行。Windows 用 PowerShell，按 [0.2 Windows](#windows-1011未实测) 设好 `edl` 之后，`edl` 命令照抄；其他命令换成下表的写法：
 
   | macOS / Linux | Windows PowerShell |
@@ -130,7 +137,7 @@ AI 助手做不了这些，到这一步要明确告诉用户做什么，等用�
 
 需要：
 
-- 一台 macOS、Linux 或 Windows 电脑，**剩余空间 20 GB 以上**（原厂整盘备份约 7.3 GB，bootstrap 镜像约 1 GB，本镜像压缩包约 0.7 GB、解压后约 3.5 GB）；
+- 一台 macOS、Linux 或 Windows 电脑，**剩余空间 20 GB 以上**（原厂整盘备份约 7.3 GB，bootstrap 镜像约 1 GB，用 `prepare.sh` 的话改好的副本再约 1 GB，本镜像压缩包约 0.7 GB、解压后约 3.5 GB）；
 - 一根**能传数据**的 USB 线（设备端是 USB-C）。最好直接插电脑本体的口，别经过扩展坞或 USB Hub；
 - [bkerler/edl](https://github.com/bkerler/edl)：高通 EDL 刷机工具，下面按系统给安装命令；
 - 解压 `.xz` 的工具和 SSH 客户端（macOS、Linux、Windows 10/11 都自带 SSH）。
@@ -209,13 +216,34 @@ edl --help
 
 期望输出开头有 `Qualcomm Sahara / Firehose Client`，后面是一长串用法说明。提示找不到 `edl`：macOS / Linux 先运行 `source ~/edl-venv/bin/activate`；Windows 先运行上面「每开一个新的 PowerShell」那两行。
 
+#### Docker（只有 A4 想用 `prepare.sh` 时才需要）
+
+`prepare.sh` 在 Docker 容器里改 bootstrap 镜像，所以要装 Docker。只用 USB 线连 bootstrap 的话不用装。
+
+- macOS：装 Docker Desktop，第一次打开时同意授权条款，等它显示正在运行：
+
+  ```bash
+  brew install --cask docker-desktop
+  ```
+
+- Linux：装 Docker Engine，把自己加进 `docker` 组，然后注销再登录：
+
+  ```bash
+  sudo apt install docker.io
+  sudo usermod -aG docker $USER
+  ```
+
+- Windows：未实测。
+
+装好后 `docker info` 不报错就可以了。
+
 ### 0.3 下载文件
 
 建一个工作目录，比如 `~/thinksmart`，把下面的文件都放进去。后面的命令都在这个目录里运行。
 
 | 文件 | 从哪下载 | 什么时候用 |
 | --- | --- | --- |
-| `thinksmart-ubuntu-<日期>.img.xz`、`SHA256SUMS` | 本仓库 [Releases](https://github.com/justhalfbit/thinksmart-ubuntu-image/releases) 最新版 | 两条路线都要 |
+| `thinksmart-ubuntu-<日期>.img.xz`、`SHA256SUMS` | 本仓库 [Releases](https://github.com/ohimsmart/oh-im-smart/releases) 最新版 | 两条路线都要 |
 | `lk2nd.img` | 上游仓库 [prebuilt/lk2nd.img](https://github.com/rickx/ubuntu-thinksmart/raw/main/prebuilt/lk2nd.img) | 只有路线 A |
 | `bootstrap-pmos-ssh-generic-qcom-msm8953.img` 和同名 `.sha256` | 上游 Release [bootstrap-2026-05-22](https://github.com/rickx/ubuntu-thinksmart/releases/tag/bootstrap-2026-05-22) | 只有路线 A |
 
@@ -229,7 +257,7 @@ curl -L -O https://github.com/rickx/ubuntu-thinksmart/releases/download/bootstra
 # 本镜像：到 Releases 页面复制最新版两个文件的下载地址，同样用 curl -L -O 下载
 ```
 
-Windows PowerShell 里把 `curl` 写成 `curl.exe`，其余照抄。GitHub 在国内打不开或很慢时，给 curl 加代理参数 `-x http://代理地址:端口`，或者用浏览器下载后放进这个目录。
+Windows PowerShell 里把 `curl` 写成 `curl.exe`，其余照抄。GitHub 在国内打不开或很慢时，给 curl 加代理参数 `-x http://<代理地址>:<端口>`，或者用浏览器下载后放进这个目录。
 
 ### 0.4 校验文件
 
@@ -257,7 +285,7 @@ xz -dk thinksmart-ubuntu-<日期>.img.xz
 shasum -a 256 -c --ignore-missing SHA256SUMS
 ```
 
-期望输出：`.img.xz: OK` 和 `.img: OK` 两行。解压后的 `.img` 约 3.5 GB（20261101 版是 `3466592256` 字节，压缩包 `711307968` 字节；以后的版本见 Release 说明）。Windows 用 7-Zip 解压，再用 `Get-FileHash` 和 `SHA256SUMS` 里 `.img` 那一行对比。
+期望输出：`.img.xz: OK` 和 `.img: OK` 两行。解压后的 `.img` 约 3.5 GB，每个版本的大小写在 Release 说明里。Windows 用 7-Zip 解压，再用 `Get-FileHash` 和 `SHA256SUMS` 里 `.img` 那一行对比。
 
 `.img` 是整个 `system` 分区的内容，里面有启动分区和根分区两个小分区。首次开机会自动把根分区扩满整个 `system` 分区。
 
@@ -322,6 +350,8 @@ system:              Offset 0x000000001c300000, Length 0x…, ...
 
 ## 路线 A：第一次刷（设备还是原厂系统）
 
+> 实验性：未经 Oh I'm Smart 在原厂设备上实测。路线 A 照上游的做法写成，Oh I'm Smart 的维护者还没有在一台原厂系统的设备上从头走过一遍。
+
 顺序和上游完全一致：
 
 ```
@@ -341,7 +371,7 @@ system:              Offset 0x000000001c300000, Length 0x…, ...
 
 ```bash
 cd ~/thinksmart
-ls -l stock-full-emmc.bin 2>/dev/null && echo "已有备份文件，换个名字，别覆盖"
+ls -l stock-full-emmc.bin 2>/dev/null && echo "stock-full-emmc.bin exists: use another name, don't overwrite it"
 edl rf stock-full-emmc.bin 2>&1 | tee backup.log
 ```
 
@@ -391,21 +421,48 @@ edl w boot lk2nd.img 2>&1 | tee flash-lk2nd.log
 
 ### A4. 刷 bootstrap 到 system 分区（先问用户）
 
+先选刷哪个 bootstrap 镜像：
+
+1. **只用 USB 线的话**，直接刷下载的 `bootstrap-pmos-ssh-generic-qcom-msm8953.img`，跳到下面的刷写命令。
+2. **想让 bootstrap 也能用 WiFi（实验性：未经 Oh I'm Smart 在原厂设备上实测）**：USB 网络连不上时（比如 Windows 认不出来），bootstrap 可以改走 WiFi。用本仓库的 `prepare.sh` 做一份改好的副本（要先装 Docker，见 0.2）：
+
+   ```bash
+   git clone https://github.com/ohimsmart/oh-im-smart.git ~/oh-im-smart
+   cd ~/thinksmart
+   ~/oh-im-smart/bootstrap/prepare.sh bootstrap-pmos-ssh-generic-qcom-msm8953.img bootstrap-prepared.img
+   ```
+
+   它会问三件事，由用户本人回答：
+   - WiFi 名称：留空表示只用 USB；最多 32 字节。
+   - WiFi 密码：留空表示开放网络；否则是 8～63 个可打印 ASCII 字符，或 64 个十六进制数字。
+   - bootstrap 的登录密码：至少 8 个字符、最多 128 字节，不能是 `thinksmart`，输入两次。
+
+   密码输入时不显示。成功时最后一行是 `prepare: wrote bootstrap-prepared.img. Delete it after flashing: it may hold your WiFi password, and holds a hash of your login password.`。下面的 `<bootstrap 镜像>` 就用 `bootstrap-prepared.img`。Windows 未实测：要装 Docker Desktop，并在 WSL 的 bash 里运行。
+3. 两项提醒：
+   - bootstrap 的 SSH 会在局域网上开着，直到刷入 Ubuntu 为止，所以登录密码不能用公开的默认值（`prepare.sh` 已经拒绝 `thinksmart`）；
+   - 刷完本镜像（A8）后删掉 `bootstrap-prepared.img`：里面有 WiFi 密码和登录密码的哈希。
+
+刷写（`<bootstrap 镜像>` 是 `bootstrap-pmos-ssh-generic-qcom-msm8953.img` 或 `bootstrap-prepared.img`）：
+
 ```bash
-edl w system bootstrap-pmos-ssh-generic-qcom-msm8953.img 2>&1 | tee flash-bootstrap.log
+edl w system <bootstrap 镜像> 2>&1 | tee flash-bootstrap.log
 edl reset
 ```
 
 期望输出：
 
-- 第一条最后：`Wrote bootstrap-pmos-ssh-generic-qcom-msm8953.img to sector 923648.`
+- 第一条最后：`Wrote <bootstrap 镜像> to sector 923648.`（edl 打印的是你刷的那个文件名）
 - `edl reset` 输出 `Reset succeeded.`
 
 设备会自己重启：先短暂出现 lk2nd 的界面，再启动 postmarketOS。**USB 线不要拔**，下一步要用它连 SSH。
 
 ### A5. SSH 登录 bootstrap
 
-bootstrap 开机后会通过 USB 线提供一个网络：设备是 `172.16.42.1`，电脑通常会自动拿到 `172.16.42.2`。
+bootstrap 开机后会通过 USB 线提供一个网络：设备是 `172.16.42.1`，电脑通常会自动拿到 `172.16.42.2`。A4 用了 `prepare.sh` 并填了 WiFi 的话，它同时也会连上 WiFi。按顺序试三种办法：先等 USB 网络（下面第 1～4 步）；两分钟内没出现就改用 WiFi；两者都不行就接键盘在设备上手动连 WiFi。
+
+登录密码：用了 `prepare.sh` 的话是当时设的；没用的话是 `thinksmart`，走过下面「两者都不行」那一步的，是那一步设的。
+
+**先等 USB 网络：**
 
 1. 等 1～2 分钟，让设备开完机。
 2. 检查电脑上多了一个网络接口：
@@ -413,12 +470,40 @@ bootstrap 开机后会通过 USB 线提供一个网络：设备是 `172.16.42.1`
    - Linux：`ip -br addr` 里多出一个 `usb0` 或 `enx…` 接口；
    - Windows（未实测）：「网络连接」里多出一个以太网适配器。bootstrap 用的是 USB NCM 网卡，Windows 11 自带 NCM 驱动，一般能直接识别；Windows 10 自带的 NCM 驱动和部分设备不兼容，可能认不出来。认不出来的话见下面「Windows 连不上 USB 网络」。
 3. 没有自动拿到 `172.16.42.x` 的地址，就手动设置这个接口：IP `172.16.42.2`，子网掩码 `255.255.0.0`，路由器留空。
-4. 登录（密码 `thinksmart`）：
+4. 登录：
 
 ```bash
 ping -c 3 172.16.42.1
 ssh -o StrictHostKeyChecking=accept-new pmos@172.16.42.1
 ```
+
+**两分钟内没出现 USB 网络，而且 A4 用了 `prepare.sh` 并填了 WiFi：** 改走 WiFi。在路由器的设备列表里找主机名 `thinksmarter`，或者扫局域网（bootstrap 只开 22 端口）：
+
+```bash
+nmap -p 22 --open <网段>
+ssh -o StrictHostKeyChecking=accept-new pmos@<bootstrap IP>
+```
+
+**两者都不行：** 接上 USB 键盘，按顺序做：
+
+1. 在设备屏幕上以 `pmos` 登录。
+2. **A4 没用 `prepare.sh` 的话，先改密码、锁住 root，再连 WiFi。** 连上 WiFi 后 bootstrap 的 SSH 就在局域网上开着，而上游镜像里 `pmos` 和 `root` 的密码都是公开的 `thinksmart`，SSH 也允许 root 用密码登录。运行下面三行：第一行给 `pmos` 设自己的密码（至少 8 个字符，不是 `thinksmart`；它会先问当前密码 `thinksmart`），之后 A5、A6 都用它；第二行锁住 `root`；第三行确认锁住了，期望打印出以 `root:!` 开头的一行：
+
+   ```sh
+   passwd
+   doas passwd -l root
+   doas grep '^root:!' /etc/shadow
+   ```
+
+   没有打印出那一行就停下来，不要连 WiFi。
+3. 运行下面四行，在 `nmtui` 里连上 WiFi，再照上面「改走 WiFi」找 IP、登录：
+
+   ```sh
+   doas sh -c 'dbus-uuidgen > /etc/machine-id'
+   doas rc-service dbus start
+   doas rc-service networkmanager start
+   doas nmtui
+   ```
 
 登录后先确认进对了系统：
 
@@ -433,7 +518,8 @@ ls /usr/local/sbin/apply-ubuntu-gpt.sh
 
 - ping 不通：确认屏幕上 postmarketOS 已经起来了；换个 USB 口；macOS 上按第 3 点手动设 IP；拔插一次 USB 线。
 - 屏幕停在 lk2nd 的界面（写着 fastboot）：bootstrap 没刷好，回到 A1 重新进 EDL，重做 A4。
-- Windows 连不上 USB 网络（未实测）：改走 WiFi。照上游的 Windows 做法，在 WSL 里用上游脚本 `sources/scripts/prepare-pmos-ssh-bootstrap-image.sh` 把 WiFi 名和密码写进 bootstrap 镜像（用法见上游 [FLASHING.md](https://github.com/rickx/ubuntu-thinksmart/blob/main/FLASHING.md) 的 Stage 0），回到 A1 重刷 A4 用这个新镜像，开机后在路由器里找主机名 `thinksmarter` 的 IP，`ssh pmos@<IP>`。也可以只在这一步借一台 macOS 或 Linux 电脑。
+- Windows 连不上 USB 网络（未实测）：在 A4 用 `prepare.sh` 加上 WiFi（Windows 上的 Docker 未实测），回到 A1 重刷 A4，再照上面「改走 WiFi」；或者只在这一步借一台 macOS 或 Linux 电脑。
+- 以前 SSH 过 `172.16.42.1` 或这个 IP、提示主机密钥变了：见[3.6](#36-ssh-提示主机密钥变了)。
 
 ### A6. 改分区表（先问用户，不可逆）
 
@@ -443,7 +529,7 @@ ls /usr/local/sbin/apply-ubuntu-gpt.sh
 sudo /usr/local/sbin/apply-ubuntu-gpt.sh
 ```
 
-`sudo` 要密码的话也是 `thinksmart`。期望输出最后：
+`sudo` 要密码的话，就是 A5 登录用的那个密码。期望输出最后：
 
 ```
 GPT rewrite complete.
@@ -494,6 +580,12 @@ edl reset
 
 写完后拔掉 USB 线，进入[第 2 步：首次开机](#2-首次开机和设置)。
 
+A4 用了 `prepare.sh` 的话，确认本镜像开机之后删掉改好的副本，它里面有 WiFi 密码和登录密码的哈希：
+
+```bash
+rm ~/thinksmart/bootstrap-prepared.img
+```
+
 ---
 
 ## 路线 B：已经刷过本镜像或上游 Ubuntu 镜像
@@ -527,14 +619,15 @@ edl reset
 
 ### 2.1 首次开机
 
+- 首次开机先出现界面语言选择（繁體中文／简体中文／English），点一个之后才到欢迎页。以后在语音客户端的设置页可以再改。
 - 第一次开机比平时慢，大约 1～2 分钟：系统会自动把根分区扩满整个 `system` 分区，并生成这台设备自己的 SSH 主机密钥。之后每次开机大约 20 秒。
 - 屏幕上会出现**欢迎页**（深色背景，有设备地址和 WiFi 状态）。
 
 ### 2.2 屏幕上连 WiFi（用户动手）
 
 1. 在欢迎页点「连接 Wi‑Fi」按钮，在「选择 Wi‑Fi」列表里点你的网络。
-2. 用屏幕键盘输入密码，点「连接」。看到「已连接 …」就成功了。
-3. 连上后欢迎页底部会显示「设备地址」，几秒后界面自动切到语音助手。
+2. 用屏幕键盘输入密码，点「连接」。面板显示「已连接 <WiFi 名称>」并回到网络列表，就成功了。
+3. 点面板右上角的 × 关掉面板。欢迎页底部会显示「设备地址」，几秒后界面自动切到语音助手。
 
 连不上：见[3.3](#33-没有-wifi屏幕配网不成功)。
 
@@ -563,7 +656,7 @@ AI 助手：**自己找，不要问用户**。
 
    没装 nmap：macOS `brew install nmap`，Linux `sudo apt install nmap`。16688 没扫到的话，可能是网关还在加载语音识别模型，等 1 分钟再扫。
 
-3. 确认候选地址：打开 `http://<IP>:16688/admin`，页面标题是「小智 Hub 管理后台」就对了。命令行：
+3. 确认候选地址：用浏览器打开 `http://<IP>:16688/admin`，标签页上的标题是「小智 Hub 管理后台」（英文浏览器上是「Xiaozhi Hub Admin」）就对了。命令行打印的是网页原文，三种语言的浏览器都一样是 `小智 Hub 管理后台`：
 
    ```bash
    curl -s http://<IP>:16688/admin | grep -o '<title>[^<]*'
@@ -573,7 +666,7 @@ macOS 上 nmap 什么都扫不到、`curl` 或 `ssh` 报 `No route to host`：�
 
 不用 nmap 的办法（Windows 也能用，Windows 上用 `ipconfig` 看本机 IP）：
 
-- 路由器管理页的 DHCP 客户端列表（设备列表），主机名是 `thinksmarter`；
+- 路由器管理页的 DHCP 客户端列表（设备列表），主机名是 `thinksmart`（`thinksmarter` 是 bootstrap 和上游镜像的主机名）；
 - 设备屏幕：欢迎页上的「设备地址」（连上 WiFi 后界面很快切到语音助手，这个地址只闪一下），或者语音界面设置页里的「本机 IP」。这一项要请用户看屏幕告诉你。
 
 下面用 `<设备IP>` 代表这个地址。
@@ -599,22 +692,18 @@ AI 助手注意：API Key 由用户自己在浏览器里填，不要替用户填
 
 ### 2.5 改默认密码（为了安全，刷完马上改）
 
-和上游一样，镜像里有两个能登录的账号，**默认密码都是 `thinksmart`，而且 SSH 都开着**：
+本镜像只有一个能登录的账号，**默认密码是 `thinksmart`，而且 SSH 开着**；`root` 已经锁住，不能登录：
 
 | 账号 | 默认密码 | 说明 |
 | --- | --- | --- |
 | `ubuntu` | `thinksmart` | 日常用的账号，可以免密 sudo |
-| `root` | `thinksmart` | 管理员账号，**SSH 也允许 root 用密码登录** |
 
-同一个局域网里的人知道默认密码就能登录这台设备，所以两个账号的密码都要改，只改 `ubuntu` 不够：
+`ubuntu` 用 `sudo` 不用输密码，这是有意的：更新和备份脚本靠它。所以 `ubuntu` 的密码就等于这台设备的管理员密码，同一个局域网里的人知道默认密码就能完全控制它，一定要改：
 
 ```bash
 ssh ubuntu@<设备IP>
 passwd               # 改 ubuntu 的密码
-sudo passwd root     # 改 root 的密码
 ```
-
-不需要用 root 远程登录的话，也可以直接锁住它的密码登录（`sudo passwd -l root`），以后需要管理员权限就用 `ubuntu` 加 `sudo`。
 
 以前 SSH 过这台设备（包括 bootstrap 阶段的 `172.16.42.1`）的话，主机密钥变了，先清掉旧记录：
 
@@ -625,10 +714,21 @@ ssh-keygen -R 172.16.42.1
 
 AI 助手注意：新密码由用户自己输入，不要替用户想密码，也不要记录下来。
 
-### 2.6 确认语音能用（用户动手）
+### 2.6 设时区
+
+本镜像默认是 UTC。在 SSH 里设成自己的时区，再确认：
+
+```bash
+sudo timedatectl set-timezone <时区>
+timedatectl
+```
+
+常见的时区：`Asia/Shanghai`、`Asia/Hong_Kong`。完整列表用 `timedatectl list-timezones` 查。`timedatectl` 的输出里 `Time zone` 一行应该是你设的时区。
+
+### 2.7 确认语音能用（用户动手）
 
 1. 对着设备说「**小麦小麦**」（也认「哈喽小麦」「小麦同学」），屏幕会切到聆听状态，并响一声提示音。
-2. 问一句，比如「今天星期几」，等它回答。
+2. 问一句，比如「今天星期几」，等它回答。唤醒词只认中文；唤醒之后用网关管理后台里「说话语言」设的语言提问。
 
 不灵的话，在 SSH 里查服务状态：
 
@@ -681,7 +781,7 @@ journalctl -u thinksmart-client -b --no-pager | tail -30
 
   ```bash
   nmcli dev wifi list
-  sudo nmcli dev wifi connect "WiFi名" password "WiFi密码"
+  sudo nmcli dev wifi connect "<WiFi名>" password "<WiFi密码>"
   ip -4 -br addr show wlan0
   ```
 
@@ -839,16 +939,16 @@ tar tf userdata.tar | head -20
    - 期望输出：先列出 `restoring: …`，最后是 `restored on the device` 和 `done; the hub needs about a minute to load its speech model`。
    - 脚本会先把整个备份解到设备上的临时目录，全部成功才停服务、替换文件；任何一步失败都会报错退出，设备保持原样，服务也会重新启动。
 
-3. 还原后网关里的管理员密码、API Key 都回到备份时的样子。设备密码不在备份里，记得按 2.5 再改一次。
+3. 还原后网关里的管理员密码、API Key 都回到备份时的样子。设备密码和时区不在备份里，还原到刚刷好的设备时，按 2.5、2.6 再做一次。
 
 ---
 
 ## 5. 以后的更新
 
-- **语音客户端**：设置页「软件更新」里检查，有新版本时点「更新」。更新包只从 HTTPS 下载，装之前逐个文件核对大小和 sha256，装坏了自动退回旧版本。
+- **语音客户端**：设置页「软件更新」里检查，有新版本时点「更新」。更新来自 [ohimsmart/oh-im-smart-client](https://github.com/ohimsmart/oh-im-smart-client) 的 Release。更新包只从 HTTPS 下载，装之前逐个文件核对大小和 sha256，装坏了自动退回旧版本。
 
   想自己发布客户端更新（比如用自己改过的客户端）：用本仓库的 `update/make-release.py` 生成更新清单和安装包，把生成的文件传到自己 GitHub 仓库的 Release，再把设备上 `/etc/thinksmart-update.conf` 里 `SOURCES` 的地址改成自己仓库的 Release 地址。不需要任何密钥。更新没有签名，更新地址上放什么，设备就会以 root 身份装什么：`SOURCES` 只填你自己的、或你信任的地址，**不要填公共的 GitHub 加速镜像或代理站**。用法见 `update/README.md`。
-- **网关**：在网关管理后台（`http://<设备IP>:16688/admin`）侧边栏点「更新网关」。页面显示当前版本的时间和短提交号，可以检查有没有新版本；只有你点了更新才会装，装失败会自动退回旧版本。
+- **网关**：在网关管理后台（`http://<设备IP>:16688/admin`）侧边栏点「更新网关」，更新来自 [ohimsmart/oh-im-smart-gateway](https://github.com/ohimsmart/oh-im-smart-gateway)。页面显示当前版本的时间和短提交号，可以检查有没有新版本；只有你点了更新才会装，装失败会自动退回旧版本。
 
   也可以用命令行，SSH 进设备后运行：
 
@@ -859,8 +959,6 @@ tar tf userdata.tar | head -20
   它会拉新代码、补装依赖、重启网关。
 - **系统软件包**：`sudo apt update && sudo apt upgrade` 可以照常用。屏幕、声音、网络依赖的 41 个包（补丁版 Mesa、WebKitGTK、Weston、PipeWire、NetworkManager 等，清单在 `image/held-packages.txt`）锁在测过的版本上，不会被升级。内核和驱动不归 apt 管，也不会变。
 - **系统层**（展示屏外壳、欢迎页、屏幕键盘、熄屏和接近传感器、麦克风服务、音频和蓝牙音箱配置、更新服务自己）：和语音客户端在同一个「软件更新」里，有新版本时一起显示，点一次「更新」先装系统层再装客户端。装之前把要换的文件都备份下来，装完重启用到它们的服务（屏幕会闪一下）并自检，没通过就把备份放回去。系统层的更新包和客户端放在同一个 Release 里（客户端仓库），本仓库的 Releases 只放刷机镜像。只换本仓库 `image/system-files.txt` 里列的文件：内核、驱动、boot 分区和 apt 装的软件包不在里面，这些要重刷；你自己改过的 `/etc/thinksmart-kiosk.conf` 等配置不会被覆盖。
-
-  用 20261101 镜像刷的设备，第一次要先装一次客户端更新（它会顺带换上能装系统层的新更新服务），之后才能看到系统层更新。
 - **系统镜像本身**：有新版镜像时按[路线 B](#路线-b已经刷过本镜像或上游-ubuntu-镜像)重刷，记得先做[4.1 备份](#41-刷机前备份)。
 
 ---
@@ -897,7 +995,8 @@ tar tf userdata.tar | head -20
 - WiFi 省电关闭：这块 QCA9379 网卡省电时会漏收 DHCP 回复，开机后要等 1～3 分钟才拿到 IP。
 - 41 个关键软件包锁定版本（见[第 5 节](#5-以后的更新)）。
 - 接近传感器直接读 `/dev/i2c-0`（`ubuntu` 在 `i2c` 组里），不再每秒调用 sudo 刷满日志。
-- 时间同步用国内也能连上的 NTP 服务器：`ntp.aliyun.com`、`ntp.tencent.com`、`cn.pool.ntp.org`，备用 `ntp.ubuntu.com`。时区是北京时间，不在中国的话改成自己的时区，比如 `sudo timedatectl set-timezone Europe/Berlin`。
+- 时间同步用五个 NTP 服务器，国内国外都连得上：`ntp.aliyun.com`、`ntp.tencent.com`、`cn.pool.ntp.org`、`pool.ntp.org`、`ntp.ubuntu.com`。时区默认是 UTC，见 [2.6](#26-设时区)。
+- 主机名是 `thinksmart`；`root` 已经锁住，只有 `ubuntu` 能登录（见 [2.5](#25-改默认密码为了安全刷完马上改)）。
 - 日志只存在 systemd 日志里（持久保存，最多 64 MB、一个月），关掉了重复写一份到 `/var/log` 的 rsyslog。查日志用 `journalctl`。
 - 不生成程序崩溃转储（core dump），省磁盘；开了 zram 压缩内存。
 - 停用了用不上的 ModemManager、avahi、udisks2。
@@ -920,6 +1019,7 @@ tar tf userdata.tar | head -20
 
 ## 致谢和声明
 
+- Oh I'm Smart 是 [justhalfbit](https://github.com/justhalfbit) 的 [thinksmart-ubuntu-image](https://github.com/justhalfbit/thinksmart-ubuntu-image)、[xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client) 和 [xiaozhi-hub-server](https://github.com/justhalfbit/xiaozhi-hub-server) 的延伸版本：镜像、语音客户端和网关都从它们出发。出处和授权见 [NOTICE](NOTICE) 和 [LICENSE](LICENSE)。
 - 设备移植、lk2nd、bootstrap 镜像和分区方案来自 [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart)，没有它就没有这个项目。上游也感谢了 FelixKa 的 postmarketOS 设备包和 TAS5782M 驱动，以及 postmarketOS 项目的内核。
 - 刷机工具是 [bkerler/edl](https://github.com/bkerler/edl)。
 - 镜像由 Ubuntu 24.04 的软件包构建。本项目是个人项目，与 Canonical、联想（Lenovo）、高通（Qualcomm）没有任何关系。「Ubuntu」「ThinkSmart」是各自所有者的商标。
@@ -930,6 +1030,8 @@ tar tf userdata.tar | head -20
 | 目录 | 内容 |
 | --- | --- |
 | `image/` | 出镜像（从设备抓取、清理、打包）、备份还原用户数据的脚本 |
+| `bootstrap/` | 准备 bootstrap 镜像（`prepare.sh`：WiFi、自己的登录密码） |
+| `tools/` | 三份教程的一致性检查（`check-readmes.sh`） |
 | `kiosk/` | 展示屏外壳（Weston + WebKitGTK 全屏页面）、欢迎页、屏幕键盘、GPU 看门狗、WiFi 省电和 NTP 设置 |
 | `screen/` | 自动熄屏、接近传感器和加速度唤醒 |
 | `xiaozhi/` | 麦克风服务和音频配置（ALSA、PipeWire、WirePlumber） |
