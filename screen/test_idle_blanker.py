@@ -28,6 +28,15 @@ def blanker(tmp_path, monkeypatch):
     ib.signal.signal = lambda *a: None
     threading.Thread(target=ib.run, daemon=True).start()   # left running: its files are this test's
 
+    def read_level():
+        # write_text empties the fake file before writing it, so a read can land in between;
+        # the real sysfs file is never empty
+        end = time.monotonic() + 2
+        while not (text := backlight.read_text()):
+            assert time.monotonic() < end, 'the fake backlight stayed empty'
+            time.sleep(0.01)
+        return int(text)
+
     class Blanker:
         seq = 0
 
@@ -43,12 +52,12 @@ def blanker(tmp_path, monkeypatch):
         DIM = ib.DIM_BRIGHTNESS
 
         def level(self):
-            return int(backlight.read_text())
+            return read_level()
 
         def blanked_within(self, seconds):
             end = time.monotonic() + seconds
             while time.monotonic() < end:
-                if int(backlight.read_text()) == ib.BLANK_BRIGHTNESS:
+                if read_level() == ib.BLANK_BRIGHTNESS:
                     return True
                 time.sleep(0.1)
             return False
