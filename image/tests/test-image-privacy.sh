@@ -4,9 +4,10 @@ set -eu
 IMG=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 n=0; failed=0
+CHK=$IMG/check-image-privacy.sh
 expect() {  # label, wanted exit code, image file, secrets argument
     n=$((n + 1)); rc=0
-    sh "$IMG/check-image-privacy.sh" "$3" "$4" >/dev/null 2>&1 || rc=$?
+    sh "$CHK" "$3" "$4" >/dev/null 2>&1 || rc=$?
     if [ "$rc" = "$2" ]; then echo "ok $n - $1"; else echo "not ok $n - $1 (exit $rc, wanted $2)"; failed=1; fi
 }
 printf 'nothing here\0\0more data\n' > "$T/clean.img"
@@ -139,5 +140,66 @@ PATH="$T/shim:$PATH" sh "$IMG/check-image-privacy.sh" "$T/secret.img" "$T/secret
 if [ -s "$T/argv" ] && ! grep -q my-wifi-name "$T/argv"; then
     echo "ok $n - a secret never reaches grep's command line"
 else echo "not ok $n - a secret never reaches grep's command line"; failed=1; fi
+# known-pem-blocks.txt: a whole block on the list is not counted, anything else is. The script reads
+# the list next to itself, so a copy gets a list of this run's own key (wrap32), made by --list-pem
+n=$((n + 1))
+mkdir "$T/kn"; cp "$IMG/check-image-privacy.sh" "$T/kn/"
+sh "$T/kn/check-image-privacy.sh" --list-pem "$T/wrap32.pem" > "$T/kn/known-pem-blocks.txt"
+if [ "$(grep -c -x -E '[0-9a-f]{64}' "$T/kn/known-pem-blocks.txt")" = 1 ] \
+    && [ "$(wc -l < "$T/kn/known-pem-blocks.txt")" = 1 ]; then
+    echo "ok $n - --list-pem prints one hash per block and nothing else"
+else echo "not ok $n - --list-pem prints one hash per block and nothing else"; failed=1; fi
+# one character changed: in the first base64 line (inside the 40 the key pattern needs) and in the last
+awk 'NR == 2 { c = substr($0, 1, 1); $0 = (c == "A" ? "B" : "A") substr($0, 2) } { print }' "$T/wrap32.pem" > "$T/changed.pem"
+awk -v last="$(($(wc -l < "$T/wrap32.pem") - 1))" \
+    'NR == last { c = substr($0, 1, 1); $0 = (c == "A" ? "B" : "A") substr($0, 2) } { print }' "$T/wrap32.pem" > "$T/changed-end.pem"
+sed '$d' "$T/wrap32.pem" > "$T/noend.pem"
+# a line break past the first 40 characters turned into byte 01 (the bytes are hashed as they are)
+{ sed -n 1,2p "$T/wrap32.pem"; sed -n 3p "$T/wrap32.pem" | tr -d '\n'; printf '\001'; sed -n '4,$p' "$T/wrap32.pem"; } > "$T/ctrl.pem"
+for k in changed changed-end noend ctrl; do { cat "$T/clean.img"; cat "$T/$k.pem"; } > "$T/$k.img"; done
+{ cat "$T/wrap32.img"; cat "$T/wrap8.pem"; } > "$T/known-other.img"
+{ cat "$T/wrap32.img"; cat "$T/wrap32.pem"; } > "$T/known-twice.img"
+mkdir "$T/tree-known" "$T/tree-known-other" "$T/tree-lf" "$T/tree-lf-known"
+cp "$T/wrap32.img" "$T/tree-known/lib.so"
+cp "$T/wrap32.img" "$T/tree-known-other/lib.so"; cp "$T/wrap8.pem" "$T/tree-known-other/other.pem"
+# a name with a line break must not let an unknown key pass as the file the first line names
+cp "$T/clean.img" "$T/tree-lf/a"; cp "$T/wrap8.pem" "$T/tree-lf/a
+"
+cp "$T/wrap32.img" "$T/tree-lf-known/lib.so"; cp "$T/wrap8.pem" "$T/tree-lf-known/lib.so
+"
+CHK=$T/kn/check-image-privacy.sh
+expect "a known block in an image passes" 0 "$T/wrap32.img" "$T/secrets"
+expect "a known block in a file tree passes" 0 "$T/tree-known" "$T/secrets"
+expect "the same known block twice passes" 0 "$T/known-twice.img" "$T/secrets"
+expect "a known block and another key in one image fails" 1 "$T/known-other.img" "$T/secrets"
+expect "a known block and another key in a file tree fails" 1 "$T/tree-known-other" "$T/secrets"
+expect "a known block with a character changed early fails" 1 "$T/changed.img" "$T/secrets"
+expect "a known block with a character changed late fails" 1 "$T/changed-end.img" "$T/secrets"
+expect "a known block without its END line fails" 1 "$T/noend.img" "$T/secrets"
+expect "a known block with a line break turned into 01 fails" 1 "$T/ctrl.img" "$T/secrets"
+expect "a key not on the list still fails" 1 "$T/wrap8.img" "$T/secrets"
+expect "a key in a file whose name has a line break fails" 1 "$T/tree-lf" "$T/secrets"
+expect "the same next to a known block fails" 1 "$T/tree-lf-known" "$T/secrets"
+n=$((n + 1))
+out=$(sh "$CHK" "$T/tree-known-other" "$T/secrets" 2>&1) || true
+if printf '%s' "$out" | grep -q 'other.pem' && ! printf '%s' "$out" | grep -q 'lib.so' \
+    && printf '%s' "$out" | grep -q 'known public test keys not counted: 1'; then
+    echo "ok $n - a tree names only the file with an unknown key and counts the known one"
+else echo "not ok $n - a tree names only the file with an unknown key and counts the known one"; failed=1; fi
+n=$((n + 1)); rc=0
+out=$(cd "$T/dash" && sh "$CHK" --list-pem - < "$T/wrap32.pem") || rc=$?
+if [ "$rc" = 0 ] && [ -n "$out" ] && [ "$out" = "$(sh "$CHK" --list-pem "$T/dash/-")" ] \
+    && [ "$out" != "$(cat "$T/kn/known-pem-blocks.txt")" ]; then
+    echo "ok $n - --list-pem - is the file named -, not stdin"
+else echo "not ok $n - --list-pem - is the file named -, not stdin (exit $rc)"; failed=1; fi
+mkdir "$T/nolist"; cp "$IMG/check-image-privacy.sh" "$T/nolist/"
+CHK=$T/nolist/check-image-privacy.sh
+expect "no known-pem-blocks.txt: refused" 2 "$T/clean.img" "$T/secrets"
+CHK=$IMG/check-image-privacy.sh
+n=$((n + 1))
+if [ "$(grep -c -x -E '[0-9a-f]{64}' "$IMG/known-pem-blocks.txt")" = 10 ] \
+    && [ "$(grep -x -E '[0-9a-f]{64}' "$IMG/known-pem-blocks.txt" | sort -u | wc -l)" = 10 ]; then
+    echo "ok $n - the committed list holds 10 distinct hashes"
+else echo "not ok $n - the committed list holds 10 distinct hashes"; failed=1; fi
 echo "1..$n"
 exit "$failed"

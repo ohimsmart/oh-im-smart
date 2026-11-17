@@ -69,9 +69,10 @@ home/ubuntu/Desktop home/ubuntu/Documents home/ubuntu/Downloads home/ubuntu/Musi
 # In the build container they lead into the container, not the image, so sanitize's deletions and
 # check-rootfs's checks would miss the image's files there. Allowed (shell patterns), where nothing
 # deletes or checks through them: Ubuntu's own, and uv's links from a Python minor version to the
-# installed release (the gateway's .venv Python, kept whole by home-allowlist.txt)
+# installed release (the gateway's .venv Python, kept whole by home-allowlist.txt), and openssl's
+# /usr/lib/ssl/certs and /usr/lib/ssl/private (both reached through /etc/ssl, which is in the image)
 # shellcheck disable=SC2034 # read by sanitize-rootfs.sh and check-rootfs.sh
-OUT_DIR_LINKS_OK='/var/run /var/lock /home/ubuntu/.local/share/uv/python/*'
+OUT_DIR_LINKS_OK='/var/run /var/lock /home/ubuntu/.local/share/uv/python/* /usr/lib/ssl/certs /usr/lib/ssl/private'
 # inroot ROOT PATH: PATH inside the image with every link on it followed there (an absolute target is
 # the image's /); past 40 links, or ., an empty name or .. after something that is not a directory
 # (the kernel refuses those), it gives up: an empty line, which no check accepts
