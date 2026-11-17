@@ -7,3 +7,8 @@ file	/home/ubuntu/xiaozhi-hub-server/LICENSE*
 file	/home/ubuntu/xiaozhi-hub-server/NOTICE*
 file	/opt/thinksmart/client/*/LICENSE*
 file	/opt/thinksmart/client/*/NOTICE*
+line	/opt/thinksmart/client/1.0.0/README.md	本仓库是 Oh I'm Smart 的语音客户端，源自半格 / HalfBit 的 [xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client)（MIT），出处见 [NOTICE](NOTICE)。
+line	/home/ubuntu/xiaozhi-hub-server/README.md	  <a href="https://github.com/justhalfbit/xiaozhi-hub-server/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
+line	/home/ubuntu/xiaozhi-hub-server/README.en.md	  <a href="https://github.com/justhalfbit/xiaozhi-hub-server/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/justhalfbit/xiaozhi-hub-server?style=flat-square" /></a>
+line	/home/ubuntu/xiaozhi-hub-server/main/xiaozhi-server/tests/scripts/test_bootstrap.py	                                    "https://github.com/justhalfbit/xiaozhi-hub-server.git"])
+line	/home/ubuntu/xiaozhi-hub-server/main/xiaozhi-server/plugins_func/functions/get_weather.py	USER_AGENT = "xiaozhi-hub-server weather plugin (https://github.com/justhalfbit/xiaozhi-hub-server)"

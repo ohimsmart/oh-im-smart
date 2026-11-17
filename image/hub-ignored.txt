@@ -7,3 +7,5 @@ main/xiaozhi-server/data/
 main/xiaozhi-server/tmp/
 # the gateway's Python environment (scripts/install.sh; scripts/start.sh runs $SERVER/.venv/bin/python)
 main/xiaozhi-server/.venv/
+# the default ASR (config.template.yaml: SherpaXASR) loads this model; the gateway downloads it at install
+main/xiaozhi-server/models/sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03/
