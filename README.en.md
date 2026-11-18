@@ -14,8 +14,6 @@ The interface comes in Traditional Chinese, Simplified Chinese and English, chos
 
 > ⚠️ Flashing wipes the original Teams / Android system. Before the first flash, **back up the whole eMMC** ([A2](#a2-back-up-the-whole-stock-emmc-required)). It is the only way back to the stock system later.
 
-The first Oh I'm Smart image is still being prepared, so the Releases page is empty for now; this sentence goes once it is published.
-
 This README is the complete flashing guide, written so that a person or an AI agent can follow it step by step.
 
 ---

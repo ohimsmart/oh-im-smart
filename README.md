@@ -14,8 +14,6 @@ Oh I'm Smart 是 [justhalfbit/thinksmart-ubuntu-image](https://github.com/justha
 
 > ⚠️ 刷机会清掉原来的 Teams / Android 系统。第一次刷之前**一定先整盘备份 eMMC**（[A2](#a2-整盘备份原厂-emmc必做)），这是以后回到原厂的唯一办法。
 
-第一个 Oh I'm Smart 镜像还在准备中，Releases 页面暂时是空的；发布后这句会删掉。
-
 本文就是完整的刷机教程，写成了人和 AI 助手都能照着一步步做的样子。
 
 ---
