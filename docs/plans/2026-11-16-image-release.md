@@ -421,7 +421,52 @@ Expected：印 `readable`、`gateway-config`、`wifi`、`hostkeys`，計數大�
 
 ## 實作記錄
 
-（實作後填寫。）
+2026-11-16 至 2026-11-19。
+
+**Commit**
+- ohimsmart（本 repo，`main`）：`bb69fa2` 測試修正、`6892d92` 系統層 1.0.0、`a439a8c` 本計劃，merge `02a4503`；`b2ce750` 網關完整 checkout 計劃，merge `27debd2`；`c56f67f` 擷取修正、`577b793` 私人資料掃描不算 GnuTLS 自測 key，merge `2edeada`；`e2d161a` README 拿掉「Releases 頁是空的」，merge `bc37f8f`。
+- 客戶端 `ohimsmart/oh-im-smart-client`：`1282847`（1.0.0）。網關 `ohimsmart/oh-im-smart-gateway`：`main` = `2d067d94`，母機和映像都是這個 commit。
+
+**Release 和標籤**
+- 線上更新：標籤 `system-v1.0.0` → `27debd2`、`c1.0.0-s1.0.0` → 客戶端 `1282847`，都有簽名；https://github.com/ohimsmart/oh-im-smart-client/releases/tag/c1.0.0-s1.0.0 ，`latest.json` 和本機建出的逐位元組相同。
+- 映像：簽名標籤 `image-20261118` → `2edeada`（ED25519，`git tag -v` 通過）；https://github.com/ohimsmart/oh-im-smart/releases/tag/image-20261118 。先以 pre-release 發佈，驗收全部通過後經維護者同意改為正式版並設為 Latest（`/releases/latest` 指向它）。四個檔案：`thinksmart-ubuntu-20261118.img.xz` 966092768 bytes（解壓後 3804233728 bytes）、`oh-im-smart-gpl-sources-20261118.tar` 258232320 bytes、`packages.txt`（780 個套件）、`SHA256SUMS`；從 Release 重新下載後 `sha256sum -c --ignore-missing SHA256SUMS` 3 個 OK（清單另外列了解壓後的 `.img` 和 GPL 包裏的 kernel 原始碼，只下載四個檔案時這兩項不在）。
+- 標籤保護（Task 0）：維護者開了 2FA，同意三個 ruleset（27385950、27385951、27385953），啟用，bypass 清單為空。
+
+**測試**
+- 本 repo：pytest 175 passed（update、kiosk、bootstrap、tools、screen）；映像測試 sanitize / privacy / build 都 exit 0；`test-image-privacy` 54/54。
+- 已發佈的客戶端 `1282847`：pytest 179 passed、node 16 passed。網關 `2d067d9`：765 passed、5 failed、5 skipped，5 個失敗都來自測試環境（`tests/test_stt.py` 4 項要本地語音辨識模型，`test_missing_packages_real_providers` 要真實 provider 的套件）；Task 0 / Task 4 列給維護者，維護者同意連同這 5 個一起發佈（spec §9 沒有例外，這是維護者的決定）。驗收第 3、4 項在母機上用真實的語音 API 對話通過。
+- `test_idle_blanker` 偶發失敗兩次（假背光檔在 truncate 和寫入之間讀到空值），修在測試 harness（`bb69fa2`），之後連續 3 次乾淨。
+
+**線上更新與回復（Task 5、6）**
+- 母機從 0.1.6 線上更新到客戶端 1.0.0、系統層 1.0.0；`system-verify` 的 tree hash 和 `latest.json` 相同；重開機後沒有失敗的 unit，維護者確認歡迎頁、客戶端、鍵盤、喚醒、對話正常。
+- 回復測試：只在本機的系統層 99.0.0（`screen-wake.service` 故意起不來）裝上後自動退回 1.0.0，訊息「系统层 99.0.0 没装成功（screen-wake.service 没有正常运行），已退回 1.0.0」，前後 `system-verify` 相同，不需要重開機。99.0.0 的標籤只在本機，已刪除，沒有推送。
+
+**映像建置與私人資料掃描（Task 7、8）**
+- 擷取母機（root 1.2G、boot 28M，zstd）後建置。root 檔案系統 3378 MB、200000 inodes，剩 527 MB；保留 2 個 capability（`ping`、`gst-ptp-helper`）。
+- 四次私人資料掃描（檔案樹、boot 檔、initramfs、整個 disk.img）都通過；ssh key、PEM 私鑰、`sk-` / `xai-` key 都是 0，`secrets.txt` 的每一行（Wi-Fi 名稱和密碼、網關 key、維護者 e-mail、舊主機名）在每次掃描都是 0。GnuTLS 內建的 10 個自測 key 以整塊 sha256 列在 `image/known-pem-blocks.txt`，不計入。整個映像掃描 31 秒。
+
+**驗收（Task 9，spec §9）**
+- 刷機前備份（教學 4.1）通過：`userdata.tar` 39 個項目，有網關設定、主機金鑰和 Wi-Fi（netplan 檔，見下面的偏離）。
+- 維護者照教學路線 B 用 edl 3.62（bkerler/edl `1cda1a6`）刷入從 Release 下載的映像：寫在 sector 923648（`system` 分割區 0x1c300000），0x716000 sectors，等於映像大小。
+- 七項都通過：
+  1. 三語選擇，選 English 後歡迎頁、客戶端、螢幕鍵盤都是英文；全部設定完重開機仍是英文。
+  2. 網關後台在英文瀏覽器上是英文。
+  3. ASR 和 TTS 用不同的 key 和網址儲存並使用。
+  4. `yue-HK`、`en` 各對話一輪。
+  5. 英文後台新增 MCP server（預填的 JSON）後正常顯示，之後刪除。
+  6. 後台檢查更新顯示 “Already up to date”；裝置上 `SOURCES` 是 `https://github.com/ohimsmart/oh-im-smart-client/releases/`，網關 remote 是 `https://github.com/ohimsmart/oh-im-smart-gateway.git`。
+  7. `ubuntu` 用預設密碼登入並改了密碼；root 的 shadow 第二欄以 `!` 開頭；`timedatectl` 設成 `Asia/Hong_Kong`。
+
+**偏離計劃的地方**
+- Task 3：母機的網關原本是 shallow / partial / sparse clone，`clean-hub-git.sh` 拒絕；另寫 `docs/plans/2026-11-16-hub-full-checkout.md`，在母機上原地改成完整 checkout，取代本計劃 Task 3 的網關步驟。
+- Task 7：第一次建置發現的問題（`/usr/lib/ssl` 的目錄連結、預設 ASR 模型目錄、上游網址、帳號殘留、音訊檔）寫成 `docs/plans/2026-11-17-image-capture-fixes.md` 處理；GnuTLS 自測 key 寫成 `docs/plans/2026-11-18-privacy-known-pem.md`，經維護者同意。
+- `secrets.txt`：維護者請助手產生；腳本從母機的 netplan 和網關設定（跟範本不同的 key）讀出，加上 git e-mail 和舊主機名，全程沒有印出任何值。
+- Task 9 Wi-Fi 檢查：母機的 `system-connections/` 是空的，Wi-Fi 在 `etc/netplan/90-NM-*.yaml`，照設計審查記下的 medium 接受它。
+- 刷機用的 edl：在 UM 上由維護者自己安裝（助手的安裝被分類器拒絕）；只裝了 `51-edl.rules`，沒有封鎖 `cdc_acm` / `qcserial`；ModemManager 只停止，沒有停用。
+
+**驗收時發現、留待之後處理**
+- 教學缺漏：Linux 路線要先 `apt install python3-dev` 等套件才能裝 edl；`edl reset` 會印 `USBError(5, 'Input/Output Error')`，裝置有重開就沒事；網關 ASR / TTS 頁要按 “Save and use”，只按 “Save” 不會切換；`timedatectl set-timezone` 會要 `ubuntu` 的密碼。
+- 網關 MCP 頁要手寫 JSON，維護者覺得不好用：發佈後改成欄位式表單，透過網關線上更新送出，不用重做映像。
 
 ## 不在這份計劃裏
 
@@ -432,4 +477,4 @@ Expected：印 `readable`、`gateway-config`、`wifi`、`hostkeys`，計數大�
 
 <!-- design-review-coverage: FULL 3/3  -->
 
-<!-- design-reviewed: PASS -->
+<!-- design-reviewed: PENDING -->
