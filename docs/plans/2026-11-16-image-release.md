@@ -477,4 +477,4 @@ Expected：印 `readable`、`gateway-config`、`wifi`、`hostkeys`，計數大�
 
 <!-- design-review-coverage: FULL 3/3  -->
 
-<!-- design-reviewed: PASS -->
+<!-- design-reviewed: PENDING -->
