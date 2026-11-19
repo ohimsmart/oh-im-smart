@@ -451,6 +451,7 @@ Expected output:
 
 - the first command ends with `Wrote <BOOTSTRAP_IMAGE> to sector 923648.` (edl prints the name of the file you flashed)
 - `edl reset` prints `Reset succeeded.`
+- Sometimes `edl reset` prints `USBError(5, 'Input/Output Error')` instead of `Reset succeeded.`. That's fine as long as the device restarts on its own (the screen lights up).
 
 The device reboots by itself: the lk2nd screen appears briefly, then postmarketOS starts. **Leave the USB cable in**; the next step uses it for SSH.
 
@@ -570,6 +571,7 @@ edl reset
 
 - Writing takes from a few minutes to twenty; don't touch the cable.
 - Expected: the output ends with `Wrote thinksmart-ubuntu-<DATE>.img to sector 923648.`, then `Reset succeeded.`
+- Sometimes `edl reset` prints `USBError(5, 'Input/Output Error')` instead of `Reset succeeded.`. That's fine as long as the device restarts on its own (the screen lights up).
 
 If it fails:
 
@@ -683,6 +685,7 @@ If you use the dedicated known-hosts file from section 4.2, clear it there too: 
 2. **Set the admin password first.** Until then, anyone on the same network can open this page.
 3. Enter the API key of your LLM provider. Claude API is the default; DeepSeek and other providers can be chosen in the admin page.
 4. Save.
+5. To use a cloud API for speech recognition or TTS: fill in the API on the Speech recognition or TTS page and press **Save and use**. **Save** alone doesn't switch; the device keeps using the old one. **Save and use** ends the current conversation, and the next one uses the new settings.
 
 Without a key, the assistant wakes up but can't answer.
 
