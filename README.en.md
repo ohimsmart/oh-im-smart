@@ -983,7 +983,7 @@ Boot order: Qualcomm PBL → stock SBL/aboot → lk2nd in the `boot` partition �
 
 ### USB network after flashing
 
-You can also SSH into the flashed system over a USB cable. With the device running, connect it to the computer with a USB cable that carries data: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically; if it doesn't, set it manually as in point 3 of "Wait for the USB network" in [A5](#a5-log-in-to-the-bootstrap-over-ssh). The image's USB network is NCM (upstream's device package defaults to RNDIS, which macOS doesn't support).
+You can also SSH into the flashed system over a USB cable. With the device running, connect it to the computer with a USB cable that carries data: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically; if it doesn't, set that interface manually on the computer: IP `172.16.42.2`, subnet mask `255.255.255.0`, router empty. The image's USB network is NCM (upstream's device package defaults to RNDIS, which macOS doesn't support).
 
 The account is `ubuntu`; for the password see [2.5](#25-change-the-default-passwords-do-it-right-after-flashing). If you SSH'd to `172.16.42.1` during the bootstrap, SSH will say the host key changed: clear the old entry first as in [3.6](#36-ssh-says-the-host-key-changed).
 
