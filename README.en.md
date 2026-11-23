@@ -633,7 +633,7 @@ Can't connect? See [3.3](#33-no-wi-fi-or-wi-fi-setup-on-the-screen-fails).
 
 ### 2.3 Find the device's IP address
 
-You need it for the browser and SSH. The flashed system currently **can't be reached over a USB cable** (see the [appendix](#usb-network-after-flashing)); use its Wi-Fi address once it's on Wi-Fi.
+You need it for the browser and SSH. You can also SSH into the flashed system over a USB cable (see the [appendix](#usb-network-after-flashing)), but using the browser over USB hasn't been tested, so the steps below all use the Wi-Fi address.
 
 AI agents: **find it yourself; don't ask the owner**.
 
@@ -777,8 +777,8 @@ What to do:
 
 - The welcome page lists nearby networks. If yours isn't there, check that the router broadcasts normally on 2.4 GHz or 5 GHz (a hidden SSID has to be typed in).
 - Right password but stuck at "Password accepted, getting a network address…": wait a minute; if it doesn't help, reboot the device once.
-- The flashed system currently can't be reached over a USB cable (see the [appendix](#usb-network-after-flashing)). If Wi-Fi setup on the screen keeps failing: reboot the device and try again; if that doesn't help, reflash (A8 / B3) and set up Wi-Fi again.
-- When you can already SSH in over Wi-Fi and want to switch to another network, connect from the command line:
+- If Wi-Fi setup on the screen keeps failing: reboot the device and try again; if that doesn't help, try SSH over a USB cable (see the [appendix](#usb-network-after-flashing); whether this works while the device isn't on Wi-Fi hasn't been tested) and connect with the `nmcli` commands in the next item; if nothing works, reflash (A8 / B3) and set up Wi-Fi again.
+- When you can already SSH in (over Wi-Fi or a USB cable) and want to connect to Wi-Fi or switch networks, connect from the command line:
 
   ```bash
   nmcli dev wifi list
@@ -821,7 +821,7 @@ journalctl -u thinksmart-kiosk -b --no-pager | tail -30
 - Restart the screen interface: `sudo kiosk-mode restart`.
 - Stuck on the welcome page: the device isn't online or the voice client didn't start; see 3.3 and the `thinksmart-client` status above.
 - Black screen but SSH works: the screen may have blanked; touch it or wave a hand in front of the device.
-- SSH doesn't work either: the flashed system can't be reached over USB, so check that the device is on Wi-Fi (3.3) and that you have the right IP (2.3); for `No route to host` on macOS see 3.8; if nothing helps, reflash (A8 / B3).
+- SSH doesn't work either: check that the device is on Wi-Fi (3.3) and that you have the right IP (2.3); for `No route to host` on macOS see 3.8; if Wi-Fi still doesn't work, try logging in over a USB cable (see the [appendix](#usb-network-after-flashing)); if nothing helps, reflash (A8 / B3).
 
 ### 3.6 SSH says the host key changed
 
@@ -983,16 +983,23 @@ Boot order: Qualcomm PBL → stock SBL/aboot → lk2nd in the `boot` partition �
 
 ### USB network after flashing
 
-**Known issue: the flashed system currently can't be reached over a USB cable.** The image's USB network is already set to NCM (device `172.16.42.1`; upstream's device package defaults to RNDIS, which macOS doesn't support), but once the system is up the device's USB port isn't recognized by the computer (it doesn't show up in the computer's USB device list), and switching back to RNDIS doesn't change that: the USB port doesn't come up in device mode. Not fixed yet.
+You can also SSH into the flashed system over a USB cable. With the device running, connect it to the computer with a USB cable that carries data: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically; if it doesn't, set it manually as in point 3 of "Wait for the USB network" in [A5](#a5-log-in-to-the-bootstrap-over-ssh). The image's USB network is NCM (upstream's device package defaults to RNDIS, which macOS doesn't support).
 
-So after flashing, connect the device to Wi-Fi and log in over its Wi-Fi address. The USB network during the bootstrap ([A5](#a5-log-in-to-the-bootstrap-over-ssh)) is not affected and works as described.
+The account is `ubuntu`; for the password see [2.5](#25-change-the-default-passwords-do-it-right-after-flashing). If you SSH'd to `172.16.42.1` during the bootstrap, SSH will say the host key changed: clear the old entry first as in [3.6](#36-ssh-says-the-host-key-changed).
+
+```bash
+ping -c 3 172.16.42.1
+ssh ubuntu@172.16.42.1
+```
+
+Tested: `image-20261118`, a Linux computer, the device on Wi-Fi; plugging the cable in while the device runs works, and so does unplugging and plugging it back in. macOS and Windows are untested, so is a device that isn't on Wi-Fi, and so is opening the admin page in a browser over USB; use the Wi-Fi address for that.
 
 ### System changes in this image
 
 Compared with the upstream image, besides dropping the Plasma desktop and booting straight into the voice interface, these changes were made (all on purpose):
 
 - No pinch zoom on the screen: the screen interface only takes the first finger, so a stray touch can't zoom the page.
-- The USB network is set to NCM instead of upstream's RNDIS (though for now the flashed system's USB port isn't recognized by computers, see the previous section).
+- The USB network is set to NCM instead of upstream's RNDIS (see the previous section for how to use it).
 - Wi-Fi power save off: this QCA9379 adapter misses DHCP replies in power save, so after a boot it took 1–3 minutes to get an IP.
 - 41 key packages held at their versions (see [section 5](#5-updates)).
 - The proximity sensor is read directly from `/dev/i2c-0` (`ubuntu` is in the `i2c` group) instead of calling sudo every second and flooding the logs.
@@ -1010,7 +1017,6 @@ Known limitations:
 
 - Wi-Fi can be set up on the screen without a network on first boot; speech recognition runs on the device, while the LLM and text-to-speech (Edge TTS by default) need the internet.
 - The camera doesn't work (upstream is still researching it).
-- The flashed system can't be reached over a USB cable, only over Wi-Fi (see [USB network after flashing](#usb-network-after-flashing)).
 - To block pinch zoom the screen only takes the first finger. When typing fast on the on-screen keyboard with two alternating fingers, a second finger that lands before the first one lifts is dropped, losing a character. Type Wi-Fi passwords slowly, one finger at a time.
 - The GPU, Wi-Fi and Bluetooth firmware in the image come from the same sources as upstream's (following upstream).
 - While a phone plays music over Bluetooth, the voice client runs echo cancellation all the time, using about 70% of one core (about 20% without music). Wi-Fi and Bluetooth share one chip, so 2.4 GHz Wi-Fi may slow down while Bluetooth plays music.
