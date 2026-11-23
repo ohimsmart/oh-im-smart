@@ -451,6 +451,7 @@ edl reset
 
 - 第一条最后：`Wrote <bootstrap 镜像> to sector 923648.`（edl 打印的是你刷的那个文件名）
 - `edl reset` 输出 `Reset succeeded.`
+- 有时 `edl reset` 会打印 `USBError(5, 'Input/Output Error')` 而不是 `Reset succeeded.`：只要设备自己重启了（屏幕亮起），就没问题。
 
 设备会自己重启：先短暂出现 lk2nd 的界面，再启动 postmarketOS。**USB 线不要拔**，下一步要用它连 SSH。
 
@@ -570,6 +571,7 @@ edl reset
 
 - 写入要几分钟到二十分钟，期间别动线。
 - 期望输出：最后有 `Wrote thinksmart-ubuntu-<日期>.img to sector 923648.`，然后是 `Reset succeeded.`
+- 有时 `edl reset` 会打印 `USBError(5, 'Input/Output Error')` 而不是 `Reset succeeded.`：只要设备自己重启了（屏幕亮起），就没问题。
 
 失败了怎么办：
 
@@ -683,6 +685,7 @@ ssh-keygen -R <设备IP>
 2. **先设管理员密码**。没设之前，同一局域网里任何人都能打开这个后台。
 3. 填大模型的 API Key。默认用 Claude API；也可以换成 DeepSeek 等其他厂商，在后台里选。
 4. 保存。
+5. 要把语音识别或语音合成换成云端 API：在「语音识别」或「语音合成」页填好 API 后按「储存并使用」。只按「储存」不会切换，设备会继续用原来的。「储存并使用」会结束当前的对话，下一次对话就用新设置。
 
 没填 Key 之前，语音助手能唤醒，但答不上来。
 
