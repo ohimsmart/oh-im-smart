@@ -821,7 +821,7 @@ journalctl -u thinksmart-kiosk -b --no-pager | tail -30
 - Restart the screen interface: `sudo kiosk-mode restart`.
 - Stuck on the welcome page: the device isn't online or the voice client didn't start; see 3.3 and the `thinksmart-client` status above.
 - Black screen but SSH works: the screen may have blanked; touch it or wave a hand in front of the device.
-- SSH doesn't work either: check that the device is on Wi-Fi (3.3) and that you have the right IP (2.3); for `No route to host` on macOS see 3.8; if Wi-Fi still doesn't work, try logging in over a USB cable (see the [appendix](#usb-network-after-flashing)); if nothing helps, reflash (A8 / B3).
+- SSH doesn't work either: check that the device is on Wi-Fi (3.3) and that you have the right IP (2.3); for `No route to host` on macOS see 3.8; if Wi-Fi still doesn't work, try logging in over a USB cable (see the [appendix](#usb-network-after-flashing); untested while the device isn't on Wi-Fi); if nothing helps, reflash (A8 / B3).
 
 ### 3.6 SSH says the host key changed
 
@@ -983,7 +983,7 @@ Boot order: Qualcomm PBL → stock SBL/aboot → lk2nd in the `boot` partition �
 
 ### USB network after flashing
 
-You can also SSH into the flashed system over a USB cable. With the device running, connect it to the computer with a USB cable that carries data: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically; if it doesn't, set that interface manually on the computer: IP `172.16.42.2`, subnet mask `255.255.255.0`, router empty. The image's USB network is NCM (upstream's device package defaults to RNDIS, which macOS doesn't support).
+You can also SSH into the flashed system over a USB cable. With the device running, connect it to the computer with a USB cable that carries data: the device is `172.16.42.1`, and the computer normally gets `172.16.42.2` automatically; if it doesn't, find the new interface on the computer (how: [A5](#a5-log-in-to-the-bootstrap-over-ssh), step 2) and set it manually: IP `172.16.42.2`, subnet mask `255.255.255.0`, router empty. The image's USB network is NCM (upstream's device package defaults to RNDIS, which macOS doesn't support).
 
 The account is `ubuntu`; for the password see [2.5](#25-change-the-default-passwords-do-it-right-after-flashing). If you SSH'd to `172.16.42.1` during the bootstrap, SSH will say the host key changed: clear the old entry first as in [3.6](#36-ssh-says-the-host-key-changed).
 
